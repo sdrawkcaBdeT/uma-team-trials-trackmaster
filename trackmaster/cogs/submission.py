@@ -12,6 +12,7 @@ import asyncio
 from trackmaster.bot import TrackmasterBot # Used for type hinting
 from trackmaster.core.validation import ValidationService
 from trackmaster.ui.views import ValidationView # We will create this
+from trackmaster.ui.embeds import create_score_embed
 
 logger = logging.getLogger(__name__)
 
@@ -92,20 +93,36 @@ class SubmissionCog(commands.Cog):
             )
 
             # 7. Send to User for Validation
-            warning = "Warning: I found {len(all_uma_scores)} Umas (expected 15). Please check carefully." if len(all_uma_scores) != 15 else None
+
+            warnings = []
+
+            # FIX 1: This is now a proper f-string
+            if len(all_uma_scores) != 15:
+                warnings.append(f"I found {len(all_uma_scores)} Umas (expected 15).")
+
             if validation_result.low_confidence_count > 0:
-                warning = f"Warning: I had trouble reading {validation_result.low_confidence_count} name(s). Please check carefully."
-            
-            # TODO: Create embed function
-            # embed = create_score_embed(validation_result.corrected_scores, event_id, warning)
+                warnings.append(f"I had trouble reading {validation_result.low_confidence_count} name(s).")
+
+            # Combine warnings into one message
+            warning_message = ""
+            if warnings:
+                # This joins them, e.g., "Warning: I found 14 Umas... I had trouble reading 1 name(s)..."
+                warning_message = "Warning: " + " ".join(warnings) + " Please check carefully."
+
+
+            # Create the embed
+            embed = create_score_embed(validation_result.corrected_scores, event_id, warning_message)
             
             # Send the confirmation buttons
-            # We pass the event_id to the view so it knows what to confirm/edit/cancel
-            view = ValidationView(bot=self.bot, event_id=event_id, corrected_data=validation_result.corrected_scores)
+            view = ValidationView(
+                bot=self.bot, 
+                event_id=event_id, 
+                corrected_data=validation_result.corrected_scores
+            )
             
             await interaction.followup.send(
-                f"Here's what I extracted for run **{event_id}**. Does this look correct?\n{warning or ''}", 
-                # embed=embed, # Add this once embed function is written
+                f"Here's what I extracted for run **{event_id}**. Does this look correct?\n\n{warning_message}", 
+                embed=embed,
                 view=view,
                 ephemeral=True
             )
