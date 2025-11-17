@@ -1,109 +1,27 @@
-# *modified* file with the custom Umamusume prompt
-"""Neural Document Processor using Nanonets OCR for superior document understanding."""
+# trackmaster/core/ocr_processor.py
 
 import logging
-import os
-from typing import Optional
-from pathlib import Path
 from PIL import Image
+
+# 1. Import the ORIGINAL classes and the module we need to patch
+from docstrange.pipeline.nanonets_processor import NanonetsDocumentProcessor
+import docstrange.pipeline.ocr_service as ocr_service_module # The module to patch
+from docstrange.pipeline.ocr_service import NanonetsOCRService
+from docstrange.extractor import DocumentExtractor
 
 logger = logging.getLogger(__name__)
 
-
-class NanonetsDocumentProcessor:
-    """Neural Document Processor using Nanonets OCR model."""
+# 2. Define our NEW class that inherits from the original
+class CustomNanonetsProcessor(NanonetsDocumentProcessor):
+    """
+    A custom processor that overrides the prompt for Umamusume data extraction.
+    """
     
-    def __init__(self, cache_dir: Optional[Path] = None):
-        """Initialize the Neural Document Processor with Nanonets OCR."""
-        logger.info("Initializing Neural Document Processor with Nanonets OCR...")
-        
-        # Initialize models
-        self._initialize_models(cache_dir)
-        
-        logger.info("Neural Document Processor initialized successfully")
-    
-    def _initialize_models(self, cache_dir: Optional[Path] = None):
-        """Initialize Nanonets OCR model from local cache."""
-        try:
-            from transformers import AutoTokenizer, AutoProcessor, AutoModelForImageTextToText
-            from .model_downloader import ModelDownloader
-            
-            # Get model downloader instance
-            model_downloader = ModelDownloader(cache_dir)
-            
-            # Get the path to the locally cached Nanonets model
-            model_path = model_downloader.get_model_path('nanonets-ocr')
-            
-            if model_path is None:
-                raise RuntimeError(
-                        "Failed to download Nanonets OCR model. "
-                        "Please ensure you have sufficient disk space and internet connection."
-                    )
-            
-            # The actual model files are in a subdirectory with the same name
-            actual_model_path = model_path / "Nanonets-OCR-ss"
-            
-            if not actual_model_path.exists():
-                raise RuntimeError(
-                    f"Model files not found at expected path: {actual_model_path}"
-                )
-            
-            logger.info(f"Loading Nanonets OCR model from local cache: {actual_model_path}")
-            
-            # Load model from local path
-            self.model = AutoModelForImageTextToText.from_pretrained(
-                str(actual_model_path), 
-                torch_dtype="auto", 
-                device_map="auto", 
-                local_files_only=True  # Use only local files
-            )
-            self.model.eval()
-            
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                str(actual_model_path),
-                local_files_only=True
-            )
-            self.processor = AutoProcessor.from_pretrained(
-                str(actual_model_path),
-                local_files_only=True
-            )
-            
-            logger.info("Nanonets OCR model loaded successfully from local cache")
-            
-        except ImportError as e:
-            logger.error(f"Transformers library not available: {e}")
-            raise ImportError(
-                "Transformers library is required for Nanonets OCR. "
-                "Please install it: pip install transformers"
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize Nanonets OCR model: {e}")
-            raise
-    
-    def extract_text(self, image_path: str) -> str:
-        """Extract text from image using Nanonets OCR."""
-        try:
-            if not os.path.exists(image_path):
-                logger.error(f"Image file does not exist: {image_path}")
-                return ""
-            
-            return self._extract_text_with_nanonets(image_path)
-                
-        except Exception as e:
-            logger.error(f"Nanonets OCR extraction failed: {e}")
-            return ""
-    
-    def extract_text_with_layout(self, image_path: str) -> str:
-        """Extract text with layout awareness using Nanonets OCR.
-        
-        Note: Nanonets OCR already provides layout-aware extraction,
-        so this method returns the same result as extract_text().
-        """
-        return self.extract_text(image_path)
-    
+    # 3. Override ONLY the one method we care about.
     def _extract_text_with_nanonets(self, image_path: str, max_new_tokens: int = 4096) -> str:
-        """Extract text using Nanonets OCR model."""
+        """Extract text using Nanonets OCR model with our custom prompt."""
         try:
+            # --- THIS IS OUR CUSTOM PROMPT ---
             prompt = """Your task is to extract all character scores from the provided Umamusume "Score Info" screenshot.
 The image contains a list of characters. For each character, you must extract their name, their team, and their score.
 
@@ -130,6 +48,7 @@ Here is a perfect example of the required output format. The example is for form
 
 Return ONLY the JSON object and nothing else.
 """
+            # --- END OF CUSTOM PROMPT ---
             
             image = Image.open(image_path)
             messages = [
@@ -140,6 +59,7 @@ Return ONLY the JSON object and nothing else.
                 ]},
             ]
             
+            # This logic is copied from the original docstrange file
             text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.processor(text=[text], images=[image], padding=True, return_tensors="pt")
             inputs = inputs.to(self.model.device)
@@ -153,7 +73,42 @@ Return ONLY the JSON object and nothing else.
         except Exception as e:
             logger.error(f"Nanonets OCR extraction failed: {e}")
             return ""
+
+# 4.need to create a custom Service that *uses* new processor
+class CustomNanonetsOCRService(NanonetsOCRService):
+    def __init__(self):
+        """Initialize the service."""
+        # key change: it now creates custom processor
+        self._processor = CustomNanonetsProcessor() 
+        logger.info("CustomNanonetsOCRService initialized")
+
+# 5. This is the function that does the "patching"
+def apply_ocr_patch():
+    """
+    Monkey-patches the docstrange library to use our custom OCR processor.
+    This MUST be called *before* DocumentExtractor is initialized.
+    """
+    logger.info("Applying custom Umamusume OCR patch...")
     
-    def __del__(self):
-        """Cleanup resources."""
-        pass 
+    # tell the ocr_service module to use our
+    # custom service class instead of its original one.
+    ocr_service_module.NanonetsOCRService = CustomNanonetsOCRService
+    
+    logger.info("Docstrange patched successfully.")
+
+# 6. This is the setup function to call from your bot
+def setup_local_extractor():
+    """Initializes the DocumentExtractor."""
+    print("Initializing the document extractor in local GPU mode...")
+    try:
+        extractor = DocumentExtractor(
+            gpu=True,
+            preserve_layout=True,
+            ocr_enabled=True
+        )
+        print("Extractor initialized successfully.")
+        return extractor
+    except RuntimeError as e:
+        print(f"CRITICAL ERROR: Could not initialize in GPU mode.")
+        print(f"   Reason: {e}")
+        return None

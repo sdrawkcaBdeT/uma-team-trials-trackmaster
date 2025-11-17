@@ -1,0 +1,16 @@
+# requirements.txt
+
+# For the bot
+discord.py
+pydantic-settings
+
+# For the database
+psycopg2-binary # For AWS Postgres
+
+# For data processing
+pandas
+thefuzz[speedup] # For fuzzy name matching
+
+# For OCR
+docstrange
+# Note: You'll also need to install torch, etc. for docstrange GPU

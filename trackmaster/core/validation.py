@@ -1,52 +1,123 @@
-from thefuzz import process as fuzzy_process
+# trackmaster/core/validation.py
 
+from thefuzz import process as fuzzy_process
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
+
+# TODO: Move this to a DB table or a flat file (e.g., umas.json)
+# For now, a set is fine.
 VALID_UMA_NAMES = {
-    "Maruzensky",
+    "King Halo",
+    "Nice Nature",
+    "Matikanefukukitaru",
+    "Haru Urara",
     "Sakura Bakushin O",
-    "Daiwa Scarlet",
-    "Special Week",
+    "Winning Ticket",
+    "Agnes Tachyon",
+    "Meijiro Ryan",
+    "Super Creek",
+    "Mayano Top Gun",
+    "Air Groove",
     "El Condor Pasa",
-    "Oguri Cap",
+    "Grass Wonder",
+    "Daiwa Scarlet",
     "Vodka",
     "Gold Ship",
-    "Seiun Sky",
-    "King Halo",
+    "Rice Shower",
     "Symboli Rudolf",
-    "Haru Urara",
-    "Silence Suzuka",
+    "Mejiro McQueen",
+    "Taiki Shuttle",
+    "Oguri Cap",
+    "Maruzensky",
+    "Tokai Teio",
+    "Silent Suzuka",
+    "Special Week",
+    "TM Opera O",
+    "Mihono Bourbon",
+    "Biwa Hayahide",
+    # "Mejiro McQueen" Anime
+    #"Tokai Teio (Anime)",
     "Curren Chan",
-    "Mejiro Ryan",
-    # ...and every other Uma...
+    "Narita Taishin",
+    "Smart Falcon",
+    "Narita Brian",
+    # "Mayano Top Gun (Wedding)",
+    # "Air Groove (Wedding)",
+    "Seiun Sky",
+    "Hishi Amazon",
+    # "El Condor Pasa (Fantasy)",
+    # "Grass Wonder (Fantasy)",
+    "Fuji Kiseki",
+    "Gold City",
+    # "Maruzensky (Summer)",
+    # "Special Week (Summer)",
+    "Meisho Doto",
+    "Eishin Flash",
+    # "Matikanefukukitaru (Full Armor)",
+    "Hishi Akebono",
+    "Agnes Digital",
+    # "Super Creek (Halloween)",
+    # "Rice Shower (Halloween)",
+    "Kawakami Princess",
+    "Manhattan Cafe",
+    # "Gold City (Festival)",
+    # "Symboli Rudolf (Festival)",
+    "Tosen Jordan",
+    "Mejiro Dober",
+    "Fine Motion",
+    "Tamamo Cross",
+    "Sakura Chiyono O",
+    "Mejiro Ardan",
+    "Admire Vega",
+    "Kitasan Black",
+    # etc
 }
 
+@dataclass
+class ValidationResult:
+    corrected_scores: List[Dict[str, Any]]
+    low_confidence_count: int = 0
+    was_auto_corrected: bool = False
 
+class ValidationService:
+    def __init__(self, db_manager): # db_manager isn't used yet, but will be
+        self.db_manager = db_manager
+        # In the future, you could load VALID_UMA_NAMES from the DB
+        self.valid_names = VALID_UMA_NAMES
+        self.confidence_threshold = 85 # Tune this value
 
-validated_scores = []
-has_low_confidence_match = False
+    async def validate_and_correct(self, ocr_scores: List[Dict[str, Any]]) -> ValidationResult:
+        """
+        Loops through OCR'd scores, validates names, and auto-corrects.
+        """
+        corrected_scores = []
+        low_confidence_count = 0
+        was_auto_corrected = False
+        
+        for uma in ocr_scores:
+            extracted_name = uma.get("name", "UNKNOWN")
+            
+            if extracted_name in self.valid_names:
+                # Perfect match
+                corrected_scores.append(uma)
+            else:
+                # Fuzzy match
+                best_match, confidence = fuzzy_process.extractOne(extracted_name, self.valid_names)
+                
+                if confidence >= self.confidence_threshold:
+                    # Auto-correct with high confidence
+                    uma["name"] = best_match
+                    uma["original_ocr_name"] = extracted_name # Keep for the modal
+                    corrected_scores.append(uma)
+                    was_auto_corrected = True
+                else:
+                    # Low confidence, flag for review
+                    uma["name"] = extracted_name # Keep the bad name for now
+                    low_confidence_count += 1
+                    corrected_scores.append(uma)
 
-for uma in ocr_data["uma_scores"]:
-    extracted_name = uma["name"]
-
-    if extracted_name in VALID_UMA_NAMES:
-        # Perfect match, high confidence!
-        uma["name"] = extracted_name # Use the canonical name
-        validated_scores.append(uma)
-    else:
-        # Not a perfect match. Let's find the closest.
-        # fuzzy_process.extractOne returns (best_match, score_out_of_100)
-        best_match, confidence = fuzzy_process.extractOne(extracted_name, VALID_UMA_NAMES)
-
-        if confidence >= 85: # You can tune this threshold
-            # High confidence "fuzzy" match.
-            # e.g., OCR read "Maruzcnsky", fuzzy match returns ("Maruzensky", 92)
-            print(f"Corrected '{extracted_name}' to '{best_match}' (Confidence: {confidence})")
-            uma["name"] = best_match # Auto-correct the name
-            validated_scores.append(uma)
-        else:
-            # Low confidence.
-            # e.g., OCR read "XyzAbc", fuzzy returns ("Special Week", 40)
-            # This is probably a cat photo or a major OCR fail.
-            has_low_confidence_match = True
-            uma["original_ocr"] = extracted_name # Keep the bad name for the "Edit" modal
-            uma["name"] = best_match # Use the (bad) best guess
-            validated_scores.append(uma)
+        return ValidationResult(
+            corrected_scores=corrected_scores,
+            low_confidence_count=low_confidence_count,
+            was_auto_corrected=was_auto_corrected
+        )
