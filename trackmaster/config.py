@@ -1,0 +1,1 @@
+# Loads secrets from .env (Bot Token, DB Host, DB Pass, etc.)

@@ -1,0 +1,1 @@
+# "How to apply this patch after installing docstrange"

@@ -1,0 +1,1 @@
+# Class that holds the docstrange extractor and processes images

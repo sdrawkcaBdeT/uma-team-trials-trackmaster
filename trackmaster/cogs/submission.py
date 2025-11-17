@@ -1,0 +1,1 @@
+# Cog for the /submit command and validation flow

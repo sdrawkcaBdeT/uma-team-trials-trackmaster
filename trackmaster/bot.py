@@ -1,0 +1,1 @@
+# Main bot file: connects to Discord, loads cogs, defines /submit

@@ -1,0 +1,1 @@
+# Cog for the /leaderboard, /team_summary commands
