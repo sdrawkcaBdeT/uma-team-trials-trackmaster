@@ -178,6 +178,36 @@ class DatabaseManager:
             return None
         finally:
             self.release_conn(conn)
-            
-    # You would add more reporting functions here...
-    # def get_team_summary_data(self) -> Optional[pd.DataFrame]: ...
+    
+    def update_single_score(self, event_id: str, original_name: str, new_name: str, new_team: str, new_score: int) -> bool:
+        """Updates a single uma_score record based on user correction."""
+        conn = self.get_conn()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    UPDATE {SCORES_TABLE}
+                    SET 
+                        uma_name = %s,
+                        team = %s,
+                        score = %s
+                    WHERE
+                        event_id = %s AND uma_name = %s
+                    """,
+                    (new_name, new_team, new_score, event_id, original_name)
+                )
+
+                updated_rows = cursor.rowcount
+                conn.commit()
+
+                if updated_rows == 0:
+                    logger.warning(f"Edit failed: No row found for {original_name} in {event_id}")
+                    return False
+                return True
+
+        except psycopg2.Error as e:
+            logger.error(f"Error updating single score: {e}")
+            conn.rollback()
+            return False
+        finally:
+            self.release_conn(conn)

@@ -5,7 +5,7 @@ import asyncio
 from typing import List, Dict, Any
 
 from trackmaster.bot import TrackmasterBot
-# from .modals import ScoreEditModal # We'll create this next
+from .modals import ScoreEditModal
 
 class ValidationView(discord.ui.View):
     """
@@ -48,13 +48,12 @@ class ValidationView(discord.ui.View):
     @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple, custom_id="edit_run")
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         # 1. Pop up the Modal
-        # We pass the data to pre-fill the form
-        
-        # modal = ScoreEditModal(bot=self.bot, event_id=self.event_id, data=self.corrected_data)
-        # await interaction.response.send_modal(modal)
-        
-        # TODO: This is our next step. For now, just a placeholder.
-        await interaction.response.send_message("The 'Edit' modal isn't built yet! Please click Cancel and resubmit.", ephemeral=True)
+        # We pass the event_id so the modal knows what run to edit
+        modal = ScoreEditModal(bot=self.bot, event_id=self.event_id)
+        await interaction.response.send_modal(modal)
+
+        # Note: The original message (with the Confirm button) remains.
+        # The modal will send its own response when submitted.
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, custom_id="cancel_run")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
