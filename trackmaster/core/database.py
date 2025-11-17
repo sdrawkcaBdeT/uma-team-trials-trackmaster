@@ -175,15 +175,15 @@ class DatabaseManager:
             
             sql_query = f"""
                 SELECT 
-                    uma_name,
-                    team,
-                    MAX(score) as max_score,
-                    AVG(score) as avg_score,
-                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY score DESC) as p95_score
+                    s.uma_name,
+                    s.team,
+                    MAX(s.score) as max_score,
+                    AVG(s.score) as avg_score,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY s.score DESC) as p95_score
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
                 WHERE {where_sql}
-                GROUP BY uma_name, team
+                GROUP BY s.uma_name, s.team
                 ORDER BY max_score DESC;
             """
             df = pd.read_sql(sql_query, conn, params=params)
@@ -214,17 +214,21 @@ class DatabaseManager:
 
             where_sql = " AND ".join(where_clauses)
             
+            # --- START OF FIX ---
             # Step 1: Get the total score for each team per event
+            # We must specify s.event_id and s.team to avoid ambiguity
             sql_query = f"""
                 SELECT 
-                    event_id, 
-                    team, 
-                    SUM(score) as team_total_score
+                    s.event_id, 
+                    s.team, 
+                    SUM(s.score) as team_total_score
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
                 WHERE {where_sql}
-                GROUP BY event_id, team;
+                GROUP BY s.event_id, s.team;
             """
+            # --- END OF FIX ---
+            
             df_team_scores = pd.read_sql(sql_query, conn, params=params)
 
             if df_team_scores.empty:
