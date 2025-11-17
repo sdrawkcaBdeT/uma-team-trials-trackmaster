@@ -109,18 +109,17 @@ class DatabaseManager:
                         (event_id, discord_user_id, roster_id, discord_user_name, run_date, run_week, status) 
                     VALUES (%s, %s, %s, %s, %s, %s, 'pending_validation')
                     """,
-                    (event_id, user_id, roster_id, user_name, now.date(), week_str) # Added roster_id
+                    (event_id, user_id, roster_id, user_name, now.date(), week_str)
                 )
                 
                 # 3. Insert all scores
                 score_data_tuples = [
-                    (event_id, uma['name'], uma.get('epithet'), uma['team'], uma['score']) # <-- ADDED uma.get('epithet')
+                    (event_id, uma['name'], uma.get('epithet'), uma['team'], uma['score'])
                     for uma in scores
                 ]
                 
                 extras.execute_values(
                     cursor,
-                    # --- UPDATE THIS LINE ---
                     f"INSERT INTO {SCORES_TABLE} (event_id, uma_name, epithet, team, score) VALUES %s",
                     score_data_tuples
                 )
@@ -156,7 +155,8 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
 
-    def get_leaderboard_data(self, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
+    # --- UPDATED FUNCTION ---
+    def get_leaderboard_data(self, user_id: int = None, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """Fetches the main leaderboard data, with optional filters."""
         conn = self.get_conn()
         try:
@@ -164,6 +164,12 @@ class DatabaseManager:
             params = []
             where_clauses = ["r.status = 'approved'"]
             
+            # --- THIS IS THE NEW LOGIC ---
+            if user_id is not None:
+                where_clauses.append("r.discord_user_id = %s")
+                params.append(user_id)
+            # --- END NEW LOGIC ---
+
             if roster_id is not None:
                 where_clauses.append("r.roster_id = %s")
                 params.append(roster_id)
@@ -177,6 +183,7 @@ class DatabaseManager:
             sql_query = f"""
                 SELECT 
                     s.uma_name,
+                    s.epithet,
                     s.team,
                     MAX(s.score) as max_score,
                     AVG(s.score) as avg_score,
@@ -184,10 +191,16 @@ class DatabaseManager:
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
                 WHERE {where_sql}
-                GROUP BY s.uma_name, s.team
+                GROUP BY s.uma_name, s.epithet, s.team
                 ORDER BY max_score DESC;
             """
             df = pd.read_sql(sql_query, conn, params=params)
+
+            # Format numbers for cleaner display
+            if not df.empty:
+                df['avg_score'] = df['avg_score'].round(0).astype(int)
+                df['p95_score'] = df['p95_score'].round(0).astype(int)
+            
             return df
         except psycopg2.Error as e:
             logger.error(f"Error getting leaderboard data: {e}")
@@ -195,7 +208,8 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
     
-    def get_team_summary_data(self, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
+    # --- UPDATED FUNCTION ---
+    def get_team_summary_data(self, user_id: int = None, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """
         Fetches the team summary data, with optional filters.
         """
@@ -205,6 +219,12 @@ class DatabaseManager:
             params = []
             where_clauses = ["r.status = 'approved'"]
             
+            # --- THIS IS THE NEW LOGIC ---
+            if user_id is not None:
+                where_clauses.append("r.discord_user_id = %s")
+                params.append(user_id)
+            # --- END NEW LOGIC ---
+
             if roster_id is not None:
                 where_clauses.append("r.roster_id = %s")
                 params.append(roster_id)
@@ -215,8 +235,6 @@ class DatabaseManager:
 
             where_sql = " AND ".join(where_clauses)
             
-            # Step 1: Get the total score for each team per event
-            # We must specify s.event_id and s.team to avoid ambiguity
             sql_query = f"""
                 SELECT 
                     s.event_id, 
@@ -231,7 +249,7 @@ class DatabaseManager:
             df_team_scores = pd.read_sql(sql_query, conn, params=params)
 
             if df_team_scores.empty:
-                return pd.DataFrame(columns=["Team", "AvgTeamBest", "MedianTeamBest", "P95TeamBest"])
+                return pd.DataFrame(columns=["team", "AvgTeamBest", "MedianTeamBest", "P95TeamBest"])
 
             # Step 2: Aggregate with pandas
             team_summary = df_team_scores.groupby('team')['team_total_score'].agg(

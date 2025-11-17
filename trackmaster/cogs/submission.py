@@ -11,7 +11,7 @@ import asyncio
 
 from trackmaster.bot import TrackmasterBot # Used for type hinting
 from trackmaster.core.validation import ValidationService
-from trackmaster.ui.views import ValidationView # We will create this
+from trackmaster.ui.views import ValidationView
 from trackmaster.ui.embeds import create_score_embed
 
 logger = logging.getLogger(__name__)
@@ -20,23 +20,26 @@ class SubmissionCog(commands.Cog):
     def __init__(self, bot: TrackmasterBot):
         self.bot = bot
 
+    # --- THIS SECTION IS UPDATED ---
     @app_commands.command(name="submit", description="Submits a new team trial run.")
     @app_commands.describe(
-        image1="The first screenshot of your scores (Top 8).",
-        image2="The second screenshot of your scores (Bottom 7).",
+        image1="The first screenshot (e.g., racers 1-5).",
+        image2="The second screenshot (e.g., racers 6-10).",
+        image3="The third screenshot (e.g., racers 11-15).",
         roster_id="Optional: Specify a roster ID. If blank, uses your active roster.",
-        image3="Optional: A third screenshot.",
-        image4="Optional: A fourth screenshot."
+        image4="Optional: A fourth screenshot if your run has more than 15 racers."
     )
     async def submit_trial(
         self,
         interaction: discord.Interaction,
         image1: discord.Attachment,
         image2: discord.Attachment,
+        image3: discord.Attachment, # <-- This is now a required argument
         roster_id: int = None,
-        image3: discord.Attachment = None,
-        image4: discord.Attachment = None
+        image4: discord.Attachment = None # <-- This is now the only optional image
     ):
+    # --- END OF UPDATES ---
+    
         # 1. Defer response immediately
         await interaction.response.defer(ephemeral=True) # ephemeral=True keeps it private
 
@@ -104,7 +107,6 @@ class SubmissionCog(commands.Cog):
             )
 
             # 7. Send to User for Validation
-
             warnings = []
 
             # FIX 1: This is now a proper f-string

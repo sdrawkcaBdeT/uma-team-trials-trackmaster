@@ -21,9 +21,10 @@ class HelpCog(commands.Cog):
             name="1. How to Submit a Run",
             value=(
                 "1. Use the `/submit` command.\n"
-                "2. Attach your two (or more) screenshots of the 'Score Info' page to the `image1` and `image2` options.\n"
-                "3. (Optional) Add a `roster_id` if you want to track this run on a specific roster (e.g., `1`, `2`).\n"
-                "4. I will scan the images and show you what I found."
+                "2. **Recommended:** Attach 3 screenshots, each showing 5 racers (for a total of 15).\n"
+                "3. You must attach at least `image1`, `image2`, and `image3`.\n"
+                "4. (Optional) Add a `roster_id` if you want to track this run on a specific roster (e.g., `1`, `2`).\n"
+                "5. I will scan the images and show you what I found."
             ),
             inline=False
         )
@@ -49,14 +50,20 @@ class HelpCog(commands.Cog):
             inline=False
         )
         
+        # --- THIS SECTION IS UPDATED ---
         embed.add_field(
             name="4. Reporting Commands",
             value=(
-                "• `/leaderboard [roster_id] [week]`: Shows the all-time best scores for each Uma. You can optionally filter by roster or week (e.g., `week:2025-W46`).\n"
-                "• `/team_summary [roster_id] [week]`: Shows the performance summary for each team (Sprint, Mile, etc.). Can also be filtered by roster or week."
+                "**Personal Reports (Just for you):**\n"
+                "• `/leaderboard [roster_id] [week]`: Shows *your* personal Uma leaderboard.\n"
+                "• `/team_summary [roster_id] [week]`: Shows *your* personal team performance.\n\n"
+                "**Global Reports (All users):**\n"
+                "• `/leaderboard_global [roster_id] [week]`: Shows the server-wide Uma leaderboard.\n"
+                "• `/team_summary_global [roster_id] [week]`: Shows the server-wide team performance."
             ),
             inline=False
         )
+        # --- END OF UPDATES ---
         
         embed.set_footer(text="Good luck in your trials!")
         

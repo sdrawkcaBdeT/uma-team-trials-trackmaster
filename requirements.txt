@@ -14,3 +14,5 @@ thefuzz[speedup] # For fuzzy name matching
 # For OCR
 docstrange
 # Note: You'll also need to install torch, etc. for docstrange GPU
+
+matplotlib
