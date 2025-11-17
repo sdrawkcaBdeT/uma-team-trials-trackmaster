@@ -9,18 +9,30 @@ import json
 import logging
 import asyncio
 
-from trackmaster.bot import TrackmasterBot # Used for type hinting
+from trackmaster.bot import TrackmasterBot
 from trackmaster.core.validation import ValidationService
 from trackmaster.ui.views import ValidationView
 from trackmaster.ui.embeds import create_score_embed
 
 logger = logging.getLogger(__name__)
 
+# --- NEW HELPER FUNCTION ---
+def run_ocr_sync(extractor, image_path: str) -> str:
+    """
+    This is the synchronous, blocking function that will be run in a thread.
+    """
+    try:
+        return extractor.extract(image_path).extract_text().strip()
+    except Exception as e:
+        logger.error(f"OCR process failed for {image_path}: {e}")
+        return "" # Return empty string on failure
+# --- END HELPER FUNCTION ---
+
+
 class SubmissionCog(commands.Cog):
     def __init__(self, bot: TrackmasterBot):
         self.bot = bot
 
-    # --- THIS SECTION IS UPDATED ---
     @app_commands.command(name="submit", description="Submits a new team trial run.")
     @app_commands.describe(
         image1="The first screenshot (e.g., racers 1-5).",
@@ -34,14 +46,13 @@ class SubmissionCog(commands.Cog):
         interaction: discord.Interaction,
         image1: discord.Attachment,
         image2: discord.Attachment,
-        image3: discord.Attachment, # <-- This is now a required argument
+        image3: discord.Attachment,
         roster_id: int = None,
-        image4: discord.Attachment = None # <-- This is now the only optional image
+        image4: discord.Attachment = None
     ):
-    # --- END OF UPDATES ---
     
         # 1. Defer response immediately
-        await interaction.response.defer(ephemeral=True) # ephemeral=True keeps it private
+        await interaction.response.defer(ephemeral=True) 
 
         attachments = [img for img in [image1, image2, image3, image4] if img is not None]
         temp_image_paths = []
@@ -59,13 +70,19 @@ class SubmissionCog(commands.Cog):
                     await attachment.save(tmp.name)
                     temp_image_paths.append(tmp.name)
 
-                    # 3. Run OCR
-                    # This now uses our patched extractor with the custom prompt
-                    result_text = self.bot.extractor.extract(tmp.name).extract_text().strip()
+                    # 3. Run OCR in a separate thread
+                    #    --- THIS IS THE FIRST FIX ---
+                    result_text = await asyncio.to_thread(
+                        run_ocr_sync, self.bot.extractor, tmp.name
+                    )
+                    
                     raw_ocr_outputs.append(result_text)
 
                     # 4. Basic JSON check
                     try:
+                        if not result_text:
+                            raise ValueError("OCR returned no text.")
+                            
                         ocr_data = json.loads(result_text)
                         if "uma_scores" not in ocr_data or not ocr_data["uma_scores"]:
                             raise ValueError("JSON missing 'uma_scores' or list is empty.")
@@ -75,7 +92,8 @@ class SubmissionCog(commands.Cog):
                         logger.warning(f"Failed to parse OCR for {attachment.filename}: {e}\nRaw: {result_text}")
                         await interaction.followup.send(
                             f"Sorry, I couldn't read the data from `{attachment.filename}`. "
-                            "It might be a cat photo or a bad screenshot. Please try again.", 
+                            f"It might be a cat photo or a bad screenshot. Please try again.\n\n"
+                            f"```\n{result_text}\n```", 
                             ephemeral=True
                         )
                         return # Hard fail on bad parse
@@ -85,7 +103,8 @@ class SubmissionCog(commands.Cog):
                 return
             
             # 5. Validate and Correct Data
-            validator = ValidationService(self.bot.db_manager) # Pass the DB manager
+            validator = ValidationService(self.bot.db_manager)
+            #    --- THIS IS THE SECOND FIX (see validation.py) ---
             validation_result = await validator.validate_and_correct(all_uma_scores)
             
             final_roster_id = roster_id
@@ -97,7 +116,6 @@ class SubmissionCog(commands.Cog):
                 )
             
             # 6. Save to DB with 'pending_validation' status
-            # We call the SYNCHRONOUS DB function in a separate thread
             event_id = await asyncio.to_thread(
                 self.bot.db_manager.create_pending_run,
                 interaction.user.id,
@@ -108,18 +126,13 @@ class SubmissionCog(commands.Cog):
 
             # 7. Send to User for Validation
             warnings = []
-
-            # FIX 1: This is now a proper f-string
             if len(all_uma_scores) != 15:
                 warnings.append(f"I found {len(all_uma_scores)} Umas (expected 15).")
-
             if validation_result.low_confidence_count > 0:
                 warnings.append(f"I had trouble reading {validation_result.low_confidence_count} name(s).")
 
-            # Combine warnings into one message
             warning_message = ""
             if warnings:
-                # This joins them, e.g., "Warning: I found 14 Umas... I had trouble reading 1 name(s)..."
                 warning_message = "Warning: " + " ".join(warnings) + " Please check carefully."
 
 
@@ -130,11 +143,12 @@ class SubmissionCog(commands.Cog):
             view = ValidationView(
                 bot=self.bot, 
                 event_id=event_id, 
-                corrected_data=validation_result.corrected_scores
+                corrected_data=validation_result.corrected_scores,
+                original_user_id=interaction.user.id
             )
             
             await interaction.followup.send(
-                f"Here's what I extracted for run **{event_id}**. Does this look correct?\n\n{warning_message}", 
+                f"Here's what I extracted for run **{event_id}** (Roster ID: {final_roster_id}). Does this look correct?\n\n{warning_message}", 
                 embed=embed,
                 view=view,
                 ephemeral=True
