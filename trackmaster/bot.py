@@ -31,12 +31,14 @@ class TrackmasterBot(commands.Bot):
         try:
             self.db_manager = DatabaseManager()
             # Run the synchronous init function in a separate thread
-            await asyncio.to_thread(self.db_manager.initialize_database)
-            logger.info("Database initialized successfully.")
+            # await asyncio.to_thread(self.db_manager.initialize_database) # <--- COMMENTED OUT
+            # logger.info("Database initialized successfully.") # <--- COMMENTED OUT
+            logger.info("Database connection pool created.") # <-- More accurate log
         except Exception as e:
-            logger.critical(f"Failed to initialize database: {e}")
+            # We still want to catch errors from the POOL creation
+            logger.critical(f"Failed to create database connection pool: {e}") 
             await self.close()
-            return
+            return    
         
         # 2. Initialize OCR Extractor
         self.extractor = setup_local_extractor()
