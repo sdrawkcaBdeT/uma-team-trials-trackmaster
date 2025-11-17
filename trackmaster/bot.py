@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 COGS_TO_LOAD = [
     "trackmaster.cogs.submission",
     "trackmaster.cogs.reporting",
+    "trackmaster.cogs.help"
 ]
 
 class TrackmasterBot(commands.Bot):

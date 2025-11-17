@@ -6,8 +6,9 @@ import logging
 import os
 import pandas as pd
 from typing import List, Dict, Any, Optional
-from trackmaster.config import settings # Using our new config file
+from trackmaster.config import settings
 import datetime
+from trackmaster.core.utils import get_current_season_id
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 SCHEMA_NAME = "team_trails_trackmaster"
 RUNS_TABLE = f"{SCHEMA_NAME}.team_trial_runs"
 SCORES_TABLE = f"{SCHEMA_NAME}.uma_scores"
+ROSTER_TABLE = f"{SCHEMA_NAME}.user_roster_settings"
 
 class DatabaseManager:
     """
@@ -81,7 +83,7 @@ class DatabaseManager:
             finally:
                 self.release_conn(conn)
 
-    def create_pending_run(self, user_id: int, user_name: str, scores: List[Dict[str, Any]]) -> str:
+    def create_pending_run(self, user_id: int, user_name: str, roster_id: int, scores: List[Dict[str, Any]]) -> str:
         """
         Saves a new run and its scores to the DB in a single transaction.
         This is a SYNCHRONOUS function.
@@ -91,7 +93,7 @@ class DatabaseManager:
             with conn.cursor() as cursor:
                 # 1. Create the event ID
                 now = datetime.datetime.now(datetime.UTC)
-                week_str = now.strftime("%Y-W%W")
+                week_str = get_current_season_id(now)
                 
                 # Get next event ID for this week
                 cursor.execute(
@@ -104,10 +106,10 @@ class DatabaseManager:
                 cursor.execute(
                     f"""
                     INSERT INTO {RUNS_TABLE} 
-                        (event_id, discord_user_id, discord_user_name, run_date, run_week, status) 
-                    VALUES (%s, %s, %s, %s, %s, 'pending_validation')
+                        (event_id, discord_user_id, roster_id, discord_user_name, run_date, run_week, status) 
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending_validation')
                     """,
-                    (event_id, user_id, user_name, now.date(), week_str)
+                    (event_id, user_id, roster_id, user_name, now.date(), week_str) # Added roster_id
                 )
                 
                 # 3. Insert all scores
@@ -153,11 +155,24 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
 
-    def get_leaderboard_data(self) -> Optional[pd.DataFrame]:
-        """Fetches the main leaderboard data, replicating your sheet."""
+    def get_leaderboard_data(self, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
+        """Fetches the main leaderboard data, with optional filters."""
         conn = self.get_conn()
         try:
-            # Your "Leaderboard" tab
+            # Build query dynamically
+            params = []
+            where_clauses = ["r.status = 'approved'"]
+            
+            if roster_id is not None:
+                where_clauses.append("r.roster_id = %s")
+                params.append(roster_id)
+            
+            if week is not None:
+                where_clauses.append("r.run_week = %s")
+                params.append(week)
+
+            where_sql = " AND ".join(where_clauses)
+            
             sql_query = f"""
                 SELECT 
                     uma_name,
@@ -167,11 +182,11 @@ class DatabaseManager:
                     PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY score DESC) as p95_score
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
-                WHERE r.status = 'approved'
+                WHERE {where_sql}
                 GROUP BY uma_name, team
                 ORDER BY max_score DESC;
             """
-            df = pd.read_sql(sql_query, conn)
+            df = pd.read_sql(sql_query, conn, params=params)
             return df
         except psycopg2.Error as e:
             logger.error(f"Error getting leaderboard data: {e}")
@@ -179,16 +194,27 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
     
-    def get_team_summary_data(self) -> Optional[pd.DataFrame]:
+    def get_team_summary_data(self, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """
-        Fetches the team summary data, replicating your sheet's logic.
-        This calculates the total score per team, per run, and then
-        aggregates those totals to get the Avg, Median, and P95.
+        Fetches the team summary data, with optional filters.
         """
         conn = self.get_conn()
         try:
-            # Step 1: Get the total score for each team (Sprint, Mile, etc.)
-            # within each approved event (run).
+            # Build query dynamically
+            params = []
+            where_clauses = ["r.status = 'approved'"]
+            
+            if roster_id is not None:
+                where_clauses.append("r.roster_id = %s")
+                params.append(roster_id)
+            
+            if week is not None:
+                where_clauses.append("r.run_week = %s")
+                params.append(week)
+
+            where_sql = " AND ".join(where_clauses)
+            
+            # Step 1: Get the total score for each team per event
             sql_query = f"""
                 SELECT 
                     event_id, 
@@ -196,23 +222,22 @@ class DatabaseManager:
                     SUM(score) as team_total_score
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
-                WHERE r.status = 'approved'
+                WHERE {where_sql}
                 GROUP BY event_id, team;
             """
-            df_team_scores = pd.read_sql(sql_query, conn)
+            df_team_scores = pd.read_sql(sql_query, conn, params=params)
 
             if df_team_scores.empty:
                 return pd.DataFrame(columns=["Team", "AvgTeamBest", "MedianTeamBest", "P95TeamBest"])
 
-            # Step 2: Now, aggregate *those* results using pandas
-            # This replicates your sheet's AvgTeamBest, MedianTeamBest, etc.
+            # Step 2: Aggregate with pandas
             team_summary = df_team_scores.groupby('team')['team_total_score'].agg(
                 AvgTeamBest='mean',
                 MedianTeamBest='median',
                 P95TeamBest=lambda x: x.quantile(0.95)
             ).reset_index()
             
-            # Format numbers for cleaner display
+            # Format numbers
             team_summary['AvgTeamBest'] = team_summary['AvgTeamBest'].round(0).astype(int)
             team_summary['MedianTeamBest'] = team_summary['MedianTeamBest'].round(0).astype(int)
             team_summary['P95TeamBest'] = team_summary['P95TeamBest'].round(0).astype(int)
@@ -255,5 +280,47 @@ class DatabaseManager:
             logger.error(f"Error updating single score: {e}")
             conn.rollback()
             return False
+        finally:
+            self.release_conn(conn)
+            
+    def set_user_active_roster(self, user_id: int, roster_id: int) -> bool:
+        """Sets or updates a user's active roster ID."""
+        conn = self.get_conn()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    INSERT INTO {ROSTER_TABLE} (discord_user_id, active_roster_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (discord_user_id) DO UPDATE SET active_roster_id = %s
+                    """,
+                    (user_id, roster_id, roster_id)
+                )
+                conn.commit()
+                return True
+        except psycopg2.Error as e:
+            logger.error(f"Error setting active roster: {e}")
+            conn.rollback()
+            return False
+        finally:
+            self.release_conn(conn)
+
+    def get_user_active_roster(self, user_id: int) -> int:
+        """Gets a user's active roster ID, defaulting to 1."""
+        conn = self.get_conn()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT active_roster_id FROM {ROSTER_TABLE} WHERE discord_user_id = %s",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+                else:
+                    return 1 # Default to 1
+        except psycopg2.Error as e:
+            logger.error(f"Error getting active roster: {e}")
+            return 1 # Default to 1 on error
         finally:
             self.release_conn(conn)

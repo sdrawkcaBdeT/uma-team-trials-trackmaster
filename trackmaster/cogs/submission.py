@@ -24,6 +24,7 @@ class SubmissionCog(commands.Cog):
     @app_commands.describe(
         image1="The first screenshot of your scores (Top 8).",
         image2="The second screenshot of your scores (Bottom 7).",
+        roster_id="Optional: Specify a roster ID. If blank, uses your active roster.",
         image3="Optional: A third screenshot.",
         image4="Optional: A fourth screenshot."
     )
@@ -32,6 +33,7 @@ class SubmissionCog(commands.Cog):
         interaction: discord.Interaction,
         image1: discord.Attachment,
         image2: discord.Attachment,
+        roster_id: int = None,
         image3: discord.Attachment = None,
         image4: discord.Attachment = None
     ):
@@ -78,10 +80,18 @@ class SubmissionCog(commands.Cog):
             if not all_uma_scores:
                 await interaction.followup.send("I couldn't find any score data in those images.", ephemeral=True)
                 return
-
+            
             # 5. Validate and Correct Data
             validator = ValidationService(self.bot.db_manager) # Pass the DB manager
             validation_result = await validator.validate_and_correct(all_uma_scores)
+            
+            final_roster_id = roster_id
+            if final_roster_id is None:
+                # Roster not provided, get their active one
+                final_roster_id = await asyncio.to_thread(
+                    self.bot.db_manager.get_user_active_roster,
+                    interaction.user.id
+                )
             
             # 6. Save to DB with 'pending_validation' status
             # We call the SYNCHRONOUS DB function in a separate thread
@@ -89,6 +99,7 @@ class SubmissionCog(commands.Cog):
                 self.bot.db_manager.create_pending_run,
                 interaction.user.id,
                 str(interaction.user),
+                final_roster_id, 
                 validation_result.corrected_scores
             )
 
@@ -136,6 +147,26 @@ class SubmissionCog(commands.Cog):
             for path in temp_image_paths:
                 if os.path.exists(path):
                     os.remove(path)
+                    
+    @app_commands.command(name="set_roster", description="Sets your active roster ID (e.g., 1, 2, 3) for future runs.")
+    @app_commands.describe(roster_id="The ID you want to set as active (e.g., 1).")
+    async def set_active_roster(self, interaction: discord.Interaction, roster_id: int):
+        await interaction.response.defer(ephemeral=True)
+        
+        if roster_id <= 0:
+            await interaction.followup.send("Roster ID must be a positive number.", ephemeral=True)
+            return
+
+        success = await asyncio.to_thread(
+            self.bot.db_manager.set_user_active_roster,
+            interaction.user.id,
+            roster_id
+        )
+        if success:
+            await interaction.followup.send(f"Your active roster ID is now set to **{roster_id}**.", ephemeral=True)
+        else:
+            await interaction.followup.send("An error occurred while setting your roster.", ephemeral=True)
+
 
 async def setup(bot: TrackmasterBot):
     await bot.add_cog(SubmissionCog(bot))
