@@ -5,7 +5,9 @@ import asyncio
 from typing import List, Dict, Any
 
 from trackmaster.bot import TrackmasterBot
-from .modals import ScoreEditModal
+from trackmaster.ui.modals import ScoreEditModal
+# --- NEW IMPORT ---
+from trackmaster.ui.embeds import create_confirmation_embed
 
 class ValidationView(discord.ui.View):
     """
@@ -27,6 +29,7 @@ class ValidationView(discord.ui.View):
                 asyncio.to_thread(self.bot.db_manager.set_run_status, self.event_id, 'rejected')
             )
 
+    # --- THIS FUNCTION IS UPDATED ---
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green, custom_id="confirm_run")
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         # 1. Defer to show "thinking"
@@ -37,11 +40,24 @@ class ValidationView(discord.ui.View):
             self.bot.db_manager.set_run_status, self.event_id, 'approved'
         )
         
-        # 3. Disable buttons and give feedback
+        # 3. Disable buttons and give NEW feedback
         if success:
-            await interaction.edit_original_response(content=f"✅ **{self.event_id}** approved and saved!", view=None, embed=None)
+            # Create a new "Confirmed" embed
+            confirmation_embed = create_confirmation_embed(self.event_id, self.corrected_data)
+            
+            # Edit the original message to show the new embed and remove the buttons
+            await interaction.edit_original_response(
+                content=f"✅ **{self.event_id}** approved and saved!", 
+                embed=confirmation_embed, 
+                view=None
+            )
         else:
-            await interaction.edit_original_response(content=f"❌ Error saving to database. Please try again.", view=None, embed=None)
+            # Error case is the same
+            await interaction.edit_original_response(
+                content=f"❌ Error saving to database. Please try again.", 
+                view=None, 
+                embed=None
+            )
         
         self.stop() # Stop the view from listening
 
@@ -51,7 +67,7 @@ class ValidationView(discord.ui.View):
         # We pass the event_id so the modal knows what run to edit
         modal = ScoreEditModal(bot=self.bot, event_id=self.event_id)
         await interaction.response.send_modal(modal)
-
+        
         # Note: The original message (with the Confirm button) remains.
         # The modal will send its own response when submitted.
 
