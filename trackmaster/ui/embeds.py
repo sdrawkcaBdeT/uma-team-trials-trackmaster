@@ -13,30 +13,30 @@ def create_score_embed(scores: List[Dict[str, Any]], event_id: str, warning: str
         description="Please review the extracted data below.",
         color=discord.Color.orange() # Orange for "pending"
     )
-
-    # We have to build the table in-place. Discord embeds don't have tables,
-    # so we use code blocks for perfect alignment.
     
     # Create headers
     names = ["**Uma Name**"]
+    epithets = ["**Epithet**"]
     teams = ["**Team**"]
     pts = ["**Score**"]
     
     # Add rows
     for uma in scores:
         names.append(uma.get('name', 'N/A'))
+        epithets.append(uma.get('epithet', 'N/A')) # <-- ADDED
         teams.append(uma.get('team', 'N/A'))
-        pts.append(f"{uma.get('score', 0):,}") # Add commas to score
+        pts.append(f"{uma.get('score', 0):,}")
 
-    # Find the longest name for padding
+    # Find longest strings for padding
     max_name_len = max(len(n) for n in names)
+    max_epithet_len = max(len(e) for e in epithets) # <-- ADDED
     max_team_len = max(len(t) for t in teams)
     
     # Build the table string
     table_string = ""
-    for name, team, score in zip(names, teams, pts):
+    for name, epithet, team, score in zip(names, epithets, teams, pts):
         # Pad strings to align columns
-        table_string += f"{name.ljust(max_name_len)} | {team.ljust(max_team_len)} | {score}\n"
+        table_string += f"{name.ljust(max_name_len)} | {epithet.ljust(max_epithet_len)} | {team.ljust(max_team_len)} | {score}\n" # <-- ADDED
         
     embed.add_field(
         name="Extracted Scores",
@@ -46,7 +46,7 @@ def create_score_embed(scores: List[Dict[str, Any]], event_id: str, warning: str
     
     if warning:
         embed.add_field(
-            name="!!! Warning",
+            name="⚠️ Warning", # Changed from "!!!"
             value=warning,
             inline=False
         )

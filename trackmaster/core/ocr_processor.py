@@ -23,26 +23,27 @@ class CustomNanonetsProcessor(NanonetsDocumentProcessor):
         try:
             # --- THIS IS OUR CUSTOM PROMPT ---
             prompt = """Your task is to extract all character scores from the provided Umamusume "Score Info" screenshot.
-The image contains a list of characters. For each character, you must extract their name, their team, and their score.
-
-- The **Name** is the main text (e.g., "Maruzensky").
-- The **Team** is the text on the circular icon (e.g., "Mile", "Sprint", "Dirt", "Medium", "Long").
-- The **Score** is the number followed by "pts" (e.g., "46,730 pts").
+The image contains a list of characters. For each character, find these four pieces of text:
+1.  The **Epithet**: Text in a small banner (e.g., "Dream Team", "Finals Champion").
+2.  The **Name**: The main, larger text (e.g., "Maruzensky", "Sakura Bakushin O").
+3.  The **Team**: The text on the circular icon (e.g., "Mile", "Sprint", "Dirt", "Medium", "Long").
+4.  The **Score**: The number followed by "pts" (e.g., "46,730 pts").
 
 Return the data as a single, valid JSON object with one key: "uma_scores".
 The "uma_scores" array must include an object for **every character** visible in the screenshot.
 
 Follow these rules exactly:
-- The "name" value must be a string.
-- The "team" value must be a string.
-- The "score" value must be a **number**. You must remove any commas and the " pts" suffix.
+- "name": Must be a string (the main, larger text).
+- "epithet": Must be a string (the text from the banner). If there is no epithet, use null.
+- "team": Must be a string from the circular icon.
+- "score": Must be a **number**. Remove commas and the " pts" suffix.
 
 Here is a perfect example of the required output format. The example is for format only, not a complete list.
 {
   "uma_scores": [
-    { "name": "Maruzensky", "team": "Mile", "score": 46730 },
-    { "name": "Sakura Bakushin O", "team": "Sprint", "score": 42638 },
-    { "name": "Daiwa Scarlet", "team": "Mile", "score": 41461 }
+    { "name": "Maruzensky", "epithet": "Dream Team", "team": "Mile", "score": 46730 },
+    { "name": "Sakura Bakushin O", "epithet": "Finals Champion", "team": "Sprint", "score": 42638 },
+    { "name": "Daiwa Scarlet", "epithet": "Dream Team", "team": "Mile", "score": 41461 }
   ]
 }
 

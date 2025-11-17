@@ -7,9 +7,6 @@ class ScoreEditModal(discord.ui.Modal, title="Edit Score"):
     """
     A modal to edit a single Uma's score.
     """
-    # This modal is designed to be simple. It does not pre-fill data.
-    # It asks the user to identify the one they want to fix.
-    
     name_to_correct = discord.ui.TextInput(
         label="Uma Name to Correct",
         placeholder="Type the name exactly as the bot found it (e.g., 'Maruzcnsky')",
@@ -22,6 +19,13 @@ class ScoreEditModal(discord.ui.Modal, title="Edit Score"):
         placeholder="The correct character name (e.g., 'Maruzensky')",
         style=discord.TextStyle.short,
         required=True
+    )
+    
+    corrected_epithet = discord.ui.TextInput(
+        label="Corrected Epithet",
+        placeholder="The correct epithet (e.g., 'Dream Team')",
+        style=discord.TextStyle.short,
+        required=False # Make it optional, some may not have one
     )
 
     corrected_team = discord.ui.TextInput(
@@ -43,6 +47,7 @@ class ScoreEditModal(discord.ui.Modal, title="Edit Score"):
         self.bot = bot
         self.event_id = event_id
 
+    # Now update the on_submit logic
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
@@ -59,6 +64,7 @@ class ScoreEditModal(discord.ui.Modal, title="Edit Score"):
             event_id=self.event_id,
             original_name=self.name_to_correct.value,
             new_name=self.corrected_name.value,
+            new_epithet=self.corrected_epithet.value or None, # Pass the new epithet
             new_team=self.corrected_team.value,
             new_score=score_num
         )

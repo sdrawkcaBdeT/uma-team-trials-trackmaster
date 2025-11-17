@@ -114,13 +114,14 @@ class DatabaseManager:
                 
                 # 3. Insert all scores
                 score_data_tuples = [
-                    (event_id, uma['name'], uma['team'], uma['score'])
+                    (event_id, uma['name'], uma.get('epithet'), uma['team'], uma['score']) # <-- ADDED uma.get('epithet')
                     for uma in scores
                 ]
                 
                 extras.execute_values(
                     cursor,
-                    f"INSERT INTO {SCORES_TABLE} (event_id, uma_name, team, score) VALUES %s",
+                    # --- UPDATE THIS LINE ---
+                    f"INSERT INTO {SCORES_TABLE} (event_id, uma_name, epithet, team, score) VALUES %s",
                     score_data_tuples
                 )
                 
@@ -214,7 +215,6 @@ class DatabaseManager:
 
             where_sql = " AND ".join(where_clauses)
             
-            # --- START OF FIX ---
             # Step 1: Get the total score for each team per event
             # We must specify s.event_id and s.team to avoid ambiguity
             sql_query = f"""
@@ -227,7 +227,6 @@ class DatabaseManager:
                 WHERE {where_sql}
                 GROUP BY s.event_id, s.team;
             """
-            # --- END OF FIX ---
             
             df_team_scores = pd.read_sql(sql_query, conn, params=params)
 
@@ -254,7 +253,7 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
     
-    def update_single_score(self, event_id: str, original_name: str, new_name: str, new_team: str, new_score: int) -> bool:
+    def update_single_score(self, event_id: str, original_name: str, new_name: str, new_epithet: str, new_team: str, new_score: int) -> bool:
         """Updates a single uma_score record based on user correction."""
         conn = self.get_conn()
         try:
@@ -264,12 +263,13 @@ class DatabaseManager:
                     UPDATE {SCORES_TABLE}
                     SET 
                         uma_name = %s,
+                        epithet = %s,
                         team = %s,
                         score = %s
                     WHERE
                         event_id = %s AND uma_name = %s
                     """,
-                    (new_name, new_team, new_score, event_id, original_name)
+                    (new_name, new_epithet, new_team, new_score, event_id, original_name)
                 )
 
                 updated_rows = cursor.rowcount

@@ -32,6 +32,7 @@ CREATE TABLE uma_scores (
     event_id VARCHAR(32) NOT NULL 
         REFERENCES team_trial_runs(event_id) ON DELETE CASCADE,
     uma_name VARCHAR(100) NOT NULL,
+    epithet VARCHAR(100) NULL, -- <-- ADD THIS LINE
     team VARCHAR(20) NOT NULL, -- 'Mile', 'Sprint', etc.
     score INT NOT NULL
 );
