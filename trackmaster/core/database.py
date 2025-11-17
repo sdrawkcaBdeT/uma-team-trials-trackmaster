@@ -179,6 +179,52 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
     
+    def get_team_summary_data(self) -> Optional[pd.DataFrame]:
+        """
+        Fetches the team summary data, replicating your sheet's logic.
+        This calculates the total score per team, per run, and then
+        aggregates those totals to get the Avg, Median, and P95.
+        """
+        conn = self.get_conn()
+        try:
+            # Step 1: Get the total score for each team (Sprint, Mile, etc.)
+            # within each approved event (run).
+            sql_query = f"""
+                SELECT 
+                    event_id, 
+                    team, 
+                    SUM(score) as team_total_score
+                FROM {SCORES_TABLE} s
+                JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
+                WHERE r.status = 'approved'
+                GROUP BY event_id, team;
+            """
+            df_team_scores = pd.read_sql(sql_query, conn)
+
+            if df_team_scores.empty:
+                return pd.DataFrame(columns=["Team", "AvgTeamBest", "MedianTeamBest", "P95TeamBest"])
+
+            # Step 2: Now, aggregate *those* results using pandas
+            # This replicates your sheet's AvgTeamBest, MedianTeamBest, etc.
+            team_summary = df_team_scores.groupby('team')['team_total_score'].agg(
+                AvgTeamBest='mean',
+                MedianTeamBest='median',
+                P95TeamBest=lambda x: x.quantile(0.95)
+            ).reset_index()
+            
+            # Format numbers for cleaner display
+            team_summary['AvgTeamBest'] = team_summary['AvgTeamBest'].round(0).astype(int)
+            team_summary['MedianTeamBest'] = team_summary['MedianTeamBest'].round(0).astype(int)
+            team_summary['P95TeamBest'] = team_summary['P95TeamBest'].round(0).astype(int)
+
+            return team_summary
+
+        except psycopg2.Error as e:
+            logger.error(f"Error getting team summary data: {e}")
+            return None
+        finally:
+            self.release_conn(conn)
+    
     def update_single_score(self, event_id: str, original_name: str, new_name: str, new_team: str, new_score: int) -> bool:
         """Updates a single uma_score record based on user correction."""
         conn = self.get_conn()

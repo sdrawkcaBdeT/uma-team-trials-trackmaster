@@ -50,14 +50,19 @@ class ReportingCog(commands.Cog):
     async def team_summary(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
-        # TODO: Implement the get_team_summary_data method in database.py
-        # For now, just send a placeholder
+        # Run the synchronous DB query in a thread
+        team_summary_df = await asyncio.to_thread(
+            self.bot.db_manager.get_team_summary_data
+        )
         
-        # team_summary_df = await asyncio.to_thread(
-        #     self.bot.db_manager.get_team_summary_data
-        # )
+        embed = discord.Embed(
+            title="Team Performance Summary",
+            description="Showing Avg, Median, and 95th Percentile for *total team scores* across all approved runs.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Team Summary", value=format_df_for_discord(team_summary_df), inline=False)
         
-        await interaction.followup.send("This command isn't fully implemented yet, but it will show your 'Team Summary' sheet!")
+        await interaction.followup.send(embed=embed)
 
 async def setup(bot: TrackmasterBot):
     await bot.add_cog(ReportingCog(bot))
