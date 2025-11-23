@@ -22,32 +22,35 @@ class CustomNanonetsProcessor(NanonetsDocumentProcessor):
         """Extract text using Nanonets OCR model with our custom prompt."""
         try:
             # --- THIS IS OUR CUSTOM PROMPT ---
-            prompt = """Your task is to extract all character scores from the provided Umamusume "Score Info" screenshot.
-The image contains a list of characters. For each character, find these four pieces of text:
-1.  The **Epithet**: Text in a small banner (e.g., "Dream Team", "Finals Champion").
-2.  The **Name**: The main, larger text (e.g., "Maruzensky", "Sakura Bakushin O").
-3.  The **Team**: The text on the circular icon (e.g., "Mile", "Sprint", "Dirt", "Medium", "Long").
-4.  The **Score**: The number followed by "pts" (e.g., "46,730 pts").
+            prompt = """You are a data entry engine extracting high scores from a video game screenshot.
+            
+VISUAL STRUCTURE:
+The image contains exactly 5 rows of character data. 
+You MUST extract exactly 5 objects. Do not stop until you have 5.
 
-Return the data as a single, valid JSON object with one key: "uma_scores".
-The "uma_scores" array must include an object for **every character** visible in the screenshot.
+For each row, find these fields:
+1. **Name**: The largest text (e.g. "Special Week"). NOTE: "Mile", "Sprint", "Long" are TEAMS, not names.
+2. **Team**: Text inside the circular icon (e.g. "Mile", "Sprint", "Dirt").
+3. **Epithet**: Small banner text above the name. If missing, use null.
+4. **Score**: The number ending in "pts".
 
-Follow these rules exactly:
-- "name": Must be a string (the main, larger text).
-- "epithet": Must be a string (the text from the banner). If there is no epithet, use null.
-- "team": Must be a string from the circular icon.
-- "score": Must be a **number**. Remove commas and the " pts" suffix.
+OUTPUT FORMAT:
+Return a single JSON object with key "uma_scores", which is a list of objects.
 
-Here is a perfect example of the required output format. The example is for format only, not a complete list.
+Example JSON structure:
 {
   "uma_scores": [
     { "name": "Maruzensky", "epithet": "Dream Team", "team": "Mile", "score": 46730 },
-    { "name": "Sakura Bakushin O", "epithet": "Finals Champion", "team": "Sprint", "score": 42638 },
-    { "name": "Daiwa Scarlet", "epithet": "Dream Team", "team": "Mile", "score": 41461 }
+    ... (3 more items) ...
+    { "name": "Oguri Cap", "epithet": null, "team": "Dirt", "score": 38200 }
   ]
 }
 
-Return ONLY the JSON object and nothing else.
+CRITICAL RULES:
+1. Do not hallucinate.
+2. Do not omit the last row. There are 5 rows.
+3. Remove commas from scores.
+4. Output ONLY valid JSON.
 """
             # --- END OF CUSTOM PROMPT ---
             

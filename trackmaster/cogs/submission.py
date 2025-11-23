@@ -51,71 +51,67 @@ class SubmissionCog(commands.Cog):
         image4: discord.Attachment = None
     ):
     
-        # 1. Defer response immediately
         await interaction.response.defer(ephemeral=True) 
 
         attachments = [img for img in [image1, image2, image3, image4] if img is not None]
         temp_image_paths = []
         all_uma_scores = []
-        raw_ocr_outputs = []
+        image_warnings = []
 
         try:
-            # 2. Process all images
-            for attachment in attachments:
+            # Process images SEQUENTIALLY to save GPU VRAM
+            for i, attachment in enumerate(attachments):
                 if not attachment.content_type.startswith("image/"):
-                    await interaction.followup.send(f"Error: {attachment.filename} is not an image.", ephemeral=True)
-                    return
+                    image_warnings.append(f"⚠️ `{attachment.filename}` is not an image.")
+                    continue
                 
+                # 1. Save to temp file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=attachment.filename) as tmp:
                     await attachment.save(tmp.name)
                     temp_image_paths.append(tmp.name)
 
-                    # 3. Run OCR in a separate thread
-                    #    --- THIS IS THE FIRST FIX ---
+                    # 2. Run OCR (Blocking, one at a time)
+                    # We use to_thread to keep the Discord bot responsive, 
+                    # but we await it immediately so we don't overload the GPU.
                     result_text = await asyncio.to_thread(
                         run_ocr_sync, self.bot.extractor, tmp.name
                     )
                     
-                    raw_ocr_outputs.append(result_text)
-
-                    # 4. Basic JSON check
+                    # 3. Parse and Verify
                     try:
                         if not result_text:
-                            raise ValueError("OCR returned no text.")
-                            
+                            image_warnings.append(f"❌ `{attachment.filename}`: No text found.")
+                            continue
+
                         ocr_data = json.loads(result_text)
-                        if "uma_scores" not in ocr_data or not ocr_data["uma_scores"]:
-                            raise ValueError("JSON missing 'uma_scores' or list is empty.")
+                        scores = ocr_data.get("uma_scores", [])
                         
-                        all_uma_scores.extend(ocr_data["uma_scores"])
-                    except (json.JSONDecodeError, ValueError) as e:
-                        logger.warning(f"Failed to parse OCR for {attachment.filename}: {e}\nRaw: {result_text}")
-                        await interaction.followup.send(
-                            f"Sorry, I couldn't read the data from `{attachment.filename}`. "
-                            f"It might be a cat photo or a bad screenshot. Please try again.\n\n"
-                            f"```\n{result_text}\n```", 
-                            ephemeral=True
-                        )
-                        return # Hard fail on bad parse
+                        # --- THE CRITICAL FIX ---
+                        # Check if we found fewer than 5 racers in this specific image
+                        if len(scores) < 5:
+                            image_warnings.append(f"⚠️ `{attachment.filename}`: Only found **{len(scores)}/5** racers. Check this carefully!")
+                        
+                        all_uma_scores.extend(scores)
+                        
+                    except (json.JSONDecodeError, ValueError):
+                        image_warnings.append(f"❌ `{attachment.filename}`: Failed to read data.")
 
             if not all_uma_scores:
-                await interaction.followup.send("I couldn't find any score data in those images.", ephemeral=True)
+                await interaction.followup.send("I couldn't extract any data. Please try again with clearer screenshots.", ephemeral=True)
                 return
             
-            # 5. Validate and Correct Data
+            # 4. Validate (using the improved validation logic from Fix 1)
             validator = ValidationService(self.bot.db_manager)
-            #    --- THIS IS THE SECOND FIX (see validation.py) ---
             validation_result = await validator.validate_and_correct(all_uma_scores)
             
             final_roster_id = roster_id
             if final_roster_id is None:
-                # Roster not provided, get their active one
                 final_roster_id = await asyncio.to_thread(
                     self.bot.db_manager.get_user_active_roster,
                     interaction.user.id
                 )
             
-            # 6. Save to DB with 'pending_validation' status
+            # 5. Save to DB
             event_id = await asyncio.to_thread(
                 self.bot.db_manager.create_pending_run,
                 interaction.user.id,
@@ -124,22 +120,22 @@ class SubmissionCog(commands.Cog):
                 validation_result.corrected_scores
             )
 
-            # 7. Send to User for Validation
-            warnings = []
+            # 6. Compile Warnings
+            final_warnings = []
+            final_warnings.extend(image_warnings) # Add our specific image warnings
+            
             if len(all_uma_scores) != 15:
-                warnings.append(f"I found {len(all_uma_scores)} Umas (expected 15).")
+                final_warnings.append(f"**Total Count Alert:** Found {len(all_uma_scores)} Umas (Expected 15).")
+            
             if validation_result.low_confidence_count > 0:
-                warnings.append(f"I had trouble reading {validation_result.low_confidence_count} name(s).")
+                final_warnings.append(f"**Low Confidence:** Unsure about {validation_result.low_confidence_count} name(s).")
 
             warning_message = ""
-            if warnings:
-                warning_message = "Warning: " + " ".join(warnings) + " Please check carefully."
+            if final_warnings:
+                warning_message = "\n".join(final_warnings)
 
-
-            # Create the embed
             embed = create_score_embed(validation_result.corrected_scores, event_id, warning_message)
             
-            # Send the confirmation buttons
             view = ValidationView(
                 bot=self.bot, 
                 event_id=event_id, 
@@ -148,7 +144,7 @@ class SubmissionCog(commands.Cog):
             )
             
             await interaction.followup.send(
-                f"Here's what I extracted for run **{event_id}** (Roster ID: {final_roster_id}). Does this look correct?\n\n{warning_message}", 
+                f"Run **{event_id}** (Roster {final_roster_id}) processed.", 
                 embed=embed,
                 view=view,
                 ephemeral=True
@@ -156,10 +152,9 @@ class SubmissionCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Error in /submit command", exc_info=e)
-            await interaction.followup.send("An unexpected error occurred. The developers have been notified.", ephemeral=True)
+            await interaction.followup.send("An unexpected error occurred.", ephemeral=True)
         
         finally:
-            # 8. Clean up temp files
             for path in temp_image_paths:
                 if os.path.exists(path):
                     os.remove(path)
