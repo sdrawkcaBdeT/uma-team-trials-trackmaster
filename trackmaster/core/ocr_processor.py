@@ -2,6 +2,8 @@
 
 import logging
 from PIL import Image
+import json
+import re
 
 # 1. Import the ORIGINAL classes and the module we need to patch
 from docstrange.pipeline.nanonets_processor import NanonetsDocumentProcessor
@@ -16,6 +18,18 @@ class CustomNanonetsProcessor(NanonetsDocumentProcessor):
     """
     A custom processor that overrides the prompt for Umamusume data extraction.
     """
+    
+    def _clean_json(self, text: str) -> str:
+        """
+        Removes markdown code blocks (```json ... ```) and whitespace 
+        to ensure json.loads() can read the output.
+        """
+        # Remove ```json and ``` wrapping
+        pattern = r"```(?:json)?\s*(.*?)\s*```"
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return match.group(1)
+        return text.strip()
     
     # 3. Override ONLY the one method we care about.
     def _extract_text_with_nanonets(self, image_path: str, max_new_tokens: int = 4096) -> str:
@@ -72,7 +86,13 @@ CRITICAL RULES:
             generated_ids = [output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, output_ids)]
             
             output_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-            return output_text[0]
+            raw_text = output_text[0]
+            clean_text = self._clean_json(raw_text)
+            
+            # Optional: Log the clean text to see what we got
+            logger.info(f"OCR Output Cleaned: {clean_text[:100]}...") 
+            
+            return clean_text
             
         except Exception as e:
             logger.error(f"Nanonets OCR extraction failed: {e}")
