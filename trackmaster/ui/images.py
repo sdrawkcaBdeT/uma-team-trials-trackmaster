@@ -202,3 +202,106 @@ def generate_team_summary_image(df: pd.DataFrame, title: str) -> str:
     except Exception as e:
         logger.error(f"Failed to save image: {e}")
         return None
+
+def generate_coach_image(bottleneck_df: pd.DataFrame, uma_df: pd.DataFrame, user_name: str) -> str:
+    logger.info(f"Generating coach image for {user_name}")
+    
+    # Setup Figure
+    fig = Figure(figsize=(14, 10))
+    FigureCanvasAgg(fig)
+    fig.patch.set_facecolor('#2E2E2E')
+    
+    # Layout: 2 Rows. Top = Strategy, Bottom = Tactics
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.5, 1])
+    ax_main = fig.add_subplot(gs[0, :]) # Top banner
+    ax_table = fig.add_subplot(gs[1, :]) # Bottom table
+
+    # --- PART 1: The Diagnosis (Top Banner) ---
+    ax_main.set_facecolor('#2E2E2E')
+    ax_main.axis('off')
+
+    if bottleneck_df.empty or uma_df.empty:
+        ax_main.text(0.5, 0.5, "Not enough data to generate coaching insights.", 
+                     ha='center', color='white', fontsize=14)
+        return _save_fig(fig)
+
+    # 1. Identify Primary Bottleneck Team
+    target_team = bottleneck_df.iloc[0]['team']
+    times_bottle = bottleneck_df.iloc[0]['times_bottleneck']
+    
+    # 2. Identify Weakest Link on THAT Team
+    # Filter Umas to only those on the target team
+    team_umas = uma_df[uma_df['team'] == target_team]
+    
+    if not team_umas.empty:
+        # Sort by a mix of Avg Score and Potential (Max Score)
+        # We penalize Umas who have low max potential more heavily
+        worst_uma = team_umas.sort_values(by='avg_delta_team').iloc[0]
+        
+        uma_name = worst_uma['uma_name']
+        avg_score = int(worst_uma['avg_score'])
+        delta = int(worst_uma['avg_delta_team'])
+        
+        # Calculate Lift: If they performed at 0 delta (Team Average)
+        potential_lift = abs(delta) * 3 # approx 3 runs a week? Or just per run.
+        
+        recommendation = (
+            f"PRIORITY: Improve {target_team} Team\n"
+            f"This team is the bottleneck in {times_bottle} of your runs.\n\n"
+            f"TARGET: Replace {uma_name}\n"
+            f"Current Avg: {avg_score:,} pts\n"
+            f"Performance: {delta:,} pts below team avg\n"
+            f"Expected Lift: +{abs(delta):,} pts per run"
+        )
+        color = '#FF5252' # Red
+    else:
+        recommendation = "Data inconsistently. Keep submitting runs."
+        color = '#FFD700'
+
+    # Draw the Recommendation Box
+    ax_main.text(0.05, 0.8, "COACH'S ANALYSIS", color='#A0A0A0', fontsize=12, weight='bold')
+    ax_main.text(0.05, 0.5, recommendation, color='white', fontsize=18, weight='bold', va='center')
+    
+    # Draw a little "Constraint" bar chart on the right side of the banner?
+    # (Simplified for now to just text to ensure stability)
+
+    # --- PART 2: The Data (Bottom Table) ---
+    ax_table.axis('off')
+    
+    headers = ["Weakest Umas (By Team Delta)", "Team", "Avg Score", "Max Potential", "Avg Team Delta"]
+    col_x = [0.05, 0.4, 0.55, 0.7, 0.85]
+    
+    for i, h in enumerate(headers):
+        ax_table.text(col_x[i], 0.9, h, color='#A0A0A0', weight='bold', transform=ax_table.transAxes)
+        
+    y_pos = 0.8
+    # Show top 5 weakest Umas across ALL teams
+    for _, row in uma_df.head(5).iterrows():
+        name = str(row['uma_name'])
+        team = str(row['team'])
+        avg = f"{int(row['avg_score']):,}"
+        max_s = f"{int(row['max_score']):,}"
+        delta = f"{int(row['avg_delta_team']):,}"
+        
+        c = '#FF5252' if int(row['avg_delta_team']) < -2000 else '#E0E0E0'
+
+        ax_table.text(col_x[0], y_pos, name, color='white', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[1], y_pos, team, color='white', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[2], y_pos, avg, color='#E0E0E0', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[3], y_pos, max_s, color='#E0E0E0', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[4], y_pos, delta, color=c, weight='bold', fontsize=12, transform=ax_table.transAxes)
+        
+        y_pos -= 0.15
+
+    _add_timestamps_to_fig(fig, "Coach Panel v1.0")
+    
+    return _save_fig(fig)
+
+def _save_fig(fig):
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+            filepath = tmp_file.name
+        fig.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
+        return filepath
+    except Exception:
+        return None

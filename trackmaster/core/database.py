@@ -369,3 +369,64 @@ class DatabaseManager:
             return False
         finally:
             self.release_conn(conn)
+    
+    def get_coach_data(self, user_id: int, roster_id: int = None):
+        """
+        Fetches complex analytics for the Coach Panel.
+        Returns:
+            - bottleneck_df: Which teams are the bottleneck and how often.
+            - underperformer_df: Umas ranked by lowest Team Delta (The "Weak Links").
+        """
+        conn = self.get_conn()
+        try:
+            params = [user_id]
+            roster_filter = ""
+            if roster_id:
+                roster_filter = "AND r.roster_id = %s"
+                params.append(roster_id)
+            
+            # 1. Identify the Team Bottlenecks (Lowest Scoring Teams)
+            sql_bottleneck = f"""
+                SELECT 
+                    b.team,
+                    COUNT(*) as times_bottleneck,
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b.team_total) as median_score
+                FROM v_event_bottlenecks b
+                JOIN {RUNS_TABLE} r ON b.event_id = r.event_id
+                WHERE r.discord_user_id = %s 
+                  AND r.status = 'approved'
+                  AND b.rank_asc = 1 -- Only the lowest scoring team
+                  {roster_filter}
+                GROUP BY b.team
+                ORDER BY times_bottleneck DESC, median_score ASC;
+            """
+            bottleneck_df = pd.read_sql(sql_bottleneck, conn, params=params)
+
+            # 2. Identify the Weakest Umas (Lowest Delta vs their own Team)
+            # We filter for Umas who are typically on the Bottleneck teams
+            sql_umas = f"""
+                SELECT 
+                    s.uma_name,
+                    s.team,
+                    COUNT(s.score) as run_count,
+                    AVG(s.score) as avg_score,
+                    MAX(s.score) as max_score,
+                    AVG(s.delta_team) as avg_delta_team -- Negative means they drag the team down
+                FROM v_score_details s
+                JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
+                WHERE r.discord_user_id = %s 
+                  AND r.status = 'approved'
+                  {roster_filter}
+                GROUP BY s.uma_name, s.team
+                HAVING COUNT(s.score) >= 2 -- Ignore one-offs
+                ORDER BY avg_delta_team ASC; -- Worst relative performers first
+            """
+            uma_df = pd.read_sql(sql_umas, conn, params=params)
+
+            return bottleneck_df, uma_df
+
+        except psycopg2.Error as e:
+            logger.error(f"Error getting coach data: {e}")
+            return None, None
+        finally:
+            self.release_conn(conn)
