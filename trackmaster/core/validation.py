@@ -7,6 +7,10 @@ import asyncio
 
 # TODO: Move this to a DB table or a flat file (e.g., umas.json)
 # For now, a set is fine.
+
+# Define valid teams to detect swaps
+VALID_TEAMS = {"Sprint", "Mile", "Medium", "Long", "Dirt"}
+
 VALID_UMA_NAMES = {
     "King Halo",
     "Nice Nature",
@@ -80,35 +84,42 @@ class ValidationResult:
     low_confidence_count: int = 0
     was_auto_corrected: bool = False
 
-# --- NEW HELPER FUNCTION ---
 def _run_validation_sync(ocr_scores: List[Dict[str, Any]], valid_names: set, confidence_threshold: int) -> ValidationResult:
-    """
-    This is the synchronous, blocking function that will be run in a thread.
-    It performs the CPU-heavy fuzzy matching.
-    """
     corrected_scores = []
     low_confidence_count = 0
     was_auto_corrected = False
     
     for uma in ocr_scores:
-        extracted_name = uma.get("name", "UNKNOWN")
+        extracted_name = uma.get("name", "UNKNOWN").strip()
+        extracted_team = uma.get("team", "UNKNOWN").strip()
         
+        # --- FIX: DETECT SWAPPED FIELDS ---
+        # If the Name looks like a Team, and the Team looks like a Name, swap them.
+        if extracted_name in VALID_TEAMS and extracted_team not in VALID_TEAMS:
+            # Check if the "team" is actually a valid name
+            swap_check, swap_conf = fuzzy_process.extractOne(extracted_team, valid_names)
+            if swap_conf > 80:
+                # Confirmed swap
+                temp = extracted_name
+                extracted_name = extracted_team
+                extracted_team = temp
+                uma["team"] = extracted_team
+                was_auto_corrected = True
+
+        # --- EXISTING NAME VALIDATION ---
         if extracted_name in valid_names:
-            # Perfect match
+            uma["name"] = extracted_name
             corrected_scores.append(uma)
         else:
-            # --- THIS IS THE BLOCKING CALL ---
             best_match, confidence = fuzzy_process.extractOne(extracted_name, valid_names)
             
             if confidence >= confidence_threshold:
-                # Auto-correct with high confidence
                 uma["name"] = best_match
-                uma["original_ocr_name"] = extracted_name # Keep for the modal
+                uma["original_ocr_name"] = extracted_name
                 corrected_scores.append(uma)
                 was_auto_corrected = True
             else:
-                # Low confidence, flag for review
-                uma["name"] = extracted_name # Keep the bad name for now
+                uma["name"] = extracted_name
                 low_confidence_count += 1
                 corrected_scores.append(uma)
 
@@ -117,23 +128,14 @@ def _run_validation_sync(ocr_scores: List[Dict[str, Any]], valid_names: set, con
         low_confidence_count=low_confidence_count,
         was_auto_corrected=was_auto_corrected
     )
-# --- END HELPER FUNCTION ---
-
 
 class ValidationService:
-    def __init__(self, db_manager): # db_manager isn't used yet, but will be
+    def __init__(self, db_manager):
         self.db_manager = db_manager
-        # In the future, you could load VALID_UMA_NAMES from the DB
         self.valid_names = VALID_UMA_NAMES
-        self.confidence_threshold = 85 # Tune this value
+        self.confidence_threshold = 85
 
-    # --- THIS FUNCTION IS NOW A WRAPPER ---
     async def validate_and_correct(self, ocr_scores: List[Dict[str, Any]]) -> ValidationResult:
-        """
-        Loops through OCR'd scores, validates names, and auto-corrects
-        by running the blocking logic in a separate thread.
-        """
-        # Run the synchronous, blocking helper function in an executor thread
         return await asyncio.to_thread(
             _run_validation_sync,
             ocr_scores,

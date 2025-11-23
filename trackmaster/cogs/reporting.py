@@ -10,7 +10,7 @@ from typing import Optional
 import os
 
 from trackmaster.bot import TrackmasterBot
-from trackmaster.ui.images import generate_leaderboard_image, generate_team_summary_image
+from trackmaster.ui.images import generate_leaderboard_image, generate_team_summary_image, generate_coach_image
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +181,38 @@ class ReportingCog(commands.Cog):
             os.remove(image_path)
         else:
             await interaction.followup.send("Sorry, I couldn't generate the team summary image.")
+
+    @app_commands.command(name="coach", description="Analyzes your runs and recommends the best move to increase total score.")
+    @app_commands.describe(roster_id="Optional: Filter by Roster ID")
+    async def coach_panel(self, interaction: discord.Interaction, roster_id: Optional[int] = None):
+        await interaction.response.defer()
+        
+        # 1. Get Data
+        bottleneck_df, uma_df = await asyncio.to_thread(
+            self.bot.db_manager.get_coach_data,
+            interaction.user.id,
+            roster_id
+        )
+
+        # 2. Check Data
+        if bottleneck_df is None or bottleneck_df.empty:
+            await interaction.followup.send("Not enough data. Submit at least 2 full runs to unlock Coaching.")
+            return
+
+        # 3. Generate Image
+        # Note: We need to import generate_coach_image at the top of reporting.py
+        image_path = await asyncio.to_thread(
+            generate_coach_image, 
+            bottleneck_df, 
+            uma_df, 
+            interaction.user.display_name
+        )
+
+        if image_path:
+            await interaction.followup.send(file=discord.File(image_path))
+            os.remove(image_path)
+        else:
+            await interaction.followup.send("Error generating coach panel.")
 
 async def setup(bot: TrackmasterBot):
     await bot.add_cog(ReportingCog(bot))

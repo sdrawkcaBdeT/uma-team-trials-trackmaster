@@ -1,6 +1,12 @@
 # trackmaster/ui/images.py
 
+import matplotlib
+# Force non-interactive backend (Prevents GUI crashes on servers)
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure 
+from matplotlib.backends.backend_agg import FigureCanvasAgg 
 import pandas as pd
 import os
 import tempfile
@@ -33,41 +39,57 @@ def _add_timestamps_to_fig(fig, generated_str):
     fig.text(0.99, 0.01, f"{generated_str}", color='#A0A0A0', fontsize=9, ha='right')
 
 def generate_leaderboard_image(df: pd.DataFrame, title: str) -> str:
-    """
-    Generates and saves a CML-style image for the Leaderboard.
-    Returns the file path to the generated image.
-    """
     logger.info(f"Generating leaderboard image for: {title}")
     if df.empty:
-        logger.warning("Leaderboard DataFrame is empty. Skipping image generation.")
-        # We should still generate a "No Data" image
         df = pd.DataFrame(columns=['uma_name', 'epithet', 'team', 'max_score', 'avg_score', 'p95_score'])
 
-    limit = 30 # Max rows to show
+    limit = 30 
     
-    # --- Setup Figure ---
-    # Adjust height based on number of rows
-    row_height = 1 / (limit + 5)
-    fig_height = (len(df.head(limit)) + 4) * row_height * 10
-    fig_height = max(5, min(15, fig_height)) # Clamp height
+    # --- SPACING FIX: Increase height multiplier per row ---
+    # Previously: (len + 4) * row_height * 10. 
+    # New: Simple linear calculation: Base of 2 inches + 0.4 inches per row.
+    fig_height = 2 + (len(df.head(limit)) * 0.4)
+    fig_height = max(5, min(20, fig_height)) # Cap at 20 inches
     
-    fig, ax = plt.subplots(figsize=(16, fig_height))
+    fig = Figure(figsize=(16, fig_height))
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    
     fig.patch.set_facecolor('#2E2E2E')
     ax.set_facecolor('#2E2E2E')
     ax.set_title(title, color='white', loc='left', pad=20, fontsize=16, weight='bold')
 
-    # --- Headers ---
-    headers = ['Uma Name', 'Epithet', 'Team', 'Max Score', 'Avg Score', 'P95 Score']
-    # Tuned positions for 6 columns
-    header_positions = [0.01, 0.25, 0.40, 0.55, 0.70, 0.85]
+    # --- Column Setup ---
+    # Check if we have the 'trainer_name' column (Global Leaderboard)
+    show_trainer = 'trainer_name' in df.columns
     
+    if show_trainer:
+        headers = ['Trainer', 'Uma Name', 'Epithet', 'Team', 'Max', 'Avg', 'P95']
+        # Adjusted positions to fit Trainer at the front
+        header_positions = [0.01, 0.15, 0.35, 0.50, 0.62, 0.75, 0.88]
+    else:
+        headers = ['Uma Name', 'Epithet', 'Team', 'Max Score', 'Avg Score', 'P95 Score']
+        header_positions = [0.01, 0.25, 0.40, 0.55, 0.70, 0.85]
+
+    # Draw Headers
     for i, header in enumerate(headers):
-        ax.text(header_positions[i], 0.935, header, color='#A0A0A0', fontsize=10, weight='bold', transform=ax.transAxes, va='top', ha='left')
+        ax.text(header_positions[i], 0.95, header, color='#A0A0A0', fontsize=11, weight='bold', transform=ax.transAxes, va='top', ha='left')
 
     # --- Data Rows ---
-    y_pos = 0.91
+    # Start y_pos slightly lower to account for spacing
+    y_start = 0.92
+    # Calculate step size based on actual number of items to fill the space evenly-ish
+    # or just use a fixed step size if we trust the figure height.
+    # Let's use a dynamic step that fits the data into the 0.9 -> 0.05 vertical space
+    row_count = len(df.head(limit))
+    if row_count > 0:
+        step_size = 0.85 / (row_count + 1) 
+    else:
+        step_size = 0.1
+
+    y_pos = y_start
     for _, row in df.head(limit).iterrows():
-        # Prepare strings
+        # Prepare basic strings
         name_str = str(row['uma_name'])
         epithet_str = str(row['epithet']) if pd.notna(row['epithet']) else '-'
         team_str = str(row['team'])
@@ -75,95 +97,211 @@ def generate_leaderboard_image(df: pd.DataFrame, title: str) -> str:
         avg_str = f"{int(row['avg_score']):,}"
         p95_str = f"{int(row['p95_score']):,}"
 
-        # Draw text
-        ax.text(header_positions[0], y_pos, name_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
-        ax.text(header_positions[1], y_pos, epithet_str, color='#BDBDBD', fontsize=11, transform=ax.transAxes, va='top', ha='left')
-        ax.text(header_positions[2], y_pos, team_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
-        ax.text(header_positions[3], y_pos, max_str, color='#FFD700', fontsize=12, weight='bold', transform=ax.transAxes, va='top', ha='left')
-        ax.text(header_positions[4], y_pos, avg_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
-        ax.text(header_positions[5], y_pos, p95_str, color='#64B5F6', fontsize=12, transform=ax.transAxes, va='top', ha='left')
+        current_col = 0
+        
+        # 1. Trainer (Optional)
+        if show_trainer:
+            trainer_str = str(row.get('trainer_name', '-'))
+            # Truncate if too long
+            if len(trainer_str) > 12: trainer_str = trainer_str[:11] + ".."
+            ax.text(header_positions[current_col], y_pos, trainer_str, color='#FFAB91', fontsize=12, transform=ax.transAxes, va='top', ha='left')
+            current_col += 1
 
-        y_pos -= (1 / (limit + 5)) # Increment y-position
+        # 2. Name
+        ax.text(header_positions[current_col], y_pos, name_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
+        current_col += 1
+        
+        # 3. Epithet
+        ax.text(header_positions[current_col], y_pos, epithet_str, color='#BDBDBD', fontsize=11, transform=ax.transAxes, va='top', ha='left')
+        current_col += 1
+        
+        # 4. Team
+        ax.text(header_positions[current_col], y_pos, team_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
+        current_col += 1
+        
+        # 5. Max
+        ax.text(header_positions[current_col], y_pos, max_str, color='#FFD700', fontsize=12, weight='bold', transform=ax.transAxes, va='top', ha='left')
+        current_col += 1
+        
+        # 6. Avg
+        ax.text(header_positions[current_col], y_pos, avg_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
+        current_col += 1
+        
+        # 7. P95
+        ax.text(header_positions[current_col], y_pos, p95_str, color='#64B5F6', fontsize=12, transform=ax.transAxes, va='top', ha='left')
 
-    # --- Final Touches ---
+        y_pos -= step_size
+
     _add_timestamps_to_fig(fig, f"{len(df)} Total Umas")
     ax.axis('off')
 
-    # Save to a temporary file
     try:
-        # Create a temp file and get its path
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
             filepath = tmp_file.name
-        
-        plt.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
-        plt.close(fig)
-        logger.info(f"Successfully saved image to {filepath}")
+        fig.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
         return filepath
     except Exception as e:
         logger.error(f"Failed to save image: {e}")
-        plt.close(fig)
         return None
 
 def generate_team_summary_image(df: pd.DataFrame, title: str) -> str:
-    """
-    Generates and saves a CML-style image for the Team Summary.
-    Returns the file path to the generated image.
-    """
     logger.info(f"Generating team summary image for: {title}")
     if df.empty:
-        logger.warning("Team summary DataFrame is empty. Skipping image generation.")
         df = pd.DataFrame(columns=['team', 'AvgTeamBest', 'MedianTeamBest', 'P95TeamBest'])
         
-    limit = 10 # Only 5 teams, so 10 is plenty
+    limit = 10
     
-    # --- Setup Figure ---
-    row_height = 1 / (limit + 5)
-    fig_height = (len(df.head(limit)) + 4) * row_height * 10
-    fig_height = max(5, min(10, fig_height))
+    # --- SPACING FIX ---
+    # More generous height calculation
+    fig_height = 2 + (len(df.head(limit)) * 0.5)
+    fig_height = max(4, min(12, fig_height))
     
-    fig, ax = plt.subplots(figsize=(12, fig_height)) # Narrower figure
+    fig = Figure(figsize=(12, fig_height))
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+
     fig.patch.set_facecolor('#2E2E2E')
     ax.set_facecolor('#2E2E2E')
     ax.set_title(title, color='white', loc='left', pad=20, fontsize=16, weight='bold')
 
-    # --- Headers ---
     headers = ['Team', 'Avg Team Best', 'Median Team Best', 'P95 Team Best']
-    header_positions = [0.01, 0.30, 0.55, 0.80] # 4 columns
+    header_positions = [0.01, 0.30, 0.55, 0.80]
     
     for i, header in enumerate(headers):
-        ax.text(header_positions[i], 0.935, header, color='#A0A0A0', fontsize=10, weight='bold', transform=ax.transAxes, va='top', ha='left')
+        ax.text(header_positions[i], 0.92, header, color='#A0A0A0', fontsize=10, weight='bold', transform=ax.transAxes, va='top', ha='left')
 
-    # --- Data Rows ---
-    y_pos = 0.91
+    # Dynamic spacing
+    row_count = len(df.head(limit))
+    if row_count > 0:
+        step_size = 0.80 / (row_count + 1) 
+    else:
+        step_size = 0.1
+
+    y_pos = 0.88
     for _, row in df.head(limit).iterrows():
-        # Prepare strings
         team_str = str(row['team'])
         avg_str = f"{int(row['AvgTeamBest']):,}"
         median_str = f"{int(row['MedianTeamBest']):,}"
         p95_str = f"{int(row['P95TeamBest']):,}"
 
-        # Draw text
         ax.text(header_positions[0], y_pos, team_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
         ax.text(header_positions[1], y_pos, avg_str, color='#FFD700', fontsize=12, weight='bold', transform=ax.transAxes, va='top', ha='left')
         ax.text(header_positions[2], y_pos, median_str, color='#E0E0E0', fontsize=12, transform=ax.transAxes, va='top', ha='left')
         ax.text(header_positions[3], y_pos, p95_str, color='#64B5F6', fontsize=12, transform=ax.transAxes, va='top', ha='left')
 
-        y_pos -= (1 / (limit + 5))
+        y_pos -= step_size
 
-    # --- Final Touches ---
     _add_timestamps_to_fig(fig, f"{len(df)} Total Teams")
     ax.axis('off')
 
-    # Save to a temporary file
     try:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
             filepath = tmp_file.name
-        
-        plt.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
-        plt.close(fig)
-        logger.info(f"Successfully saved image to {filepath}")
+        fig.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
         return filepath
     except Exception as e:
         logger.error(f"Failed to save image: {e}")
-        plt.close(fig)
+        return None
+
+def generate_coach_image(bottleneck_df: pd.DataFrame, uma_df: pd.DataFrame, user_name: str) -> str:
+    logger.info(f"Generating coach image for {user_name}")
+    
+    # Setup Figure
+    fig = Figure(figsize=(14, 10))
+    FigureCanvasAgg(fig)
+    fig.patch.set_facecolor('#2E2E2E')
+    
+    # Layout: 2 Rows. Top = Strategy, Bottom = Tactics
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.5, 1])
+    ax_main = fig.add_subplot(gs[0, :]) # Top banner
+    ax_table = fig.add_subplot(gs[1, :]) # Bottom table
+
+    # --- PART 1: The Diagnosis (Top Banner) ---
+    ax_main.set_facecolor('#2E2E2E')
+    ax_main.axis('off')
+
+    if bottleneck_df.empty or uma_df.empty:
+        ax_main.text(0.5, 0.5, "Not enough data to generate coaching insights.", 
+                     ha='center', color='white', fontsize=14)
+        return _save_fig(fig)
+
+    # 1. Identify Primary Bottleneck Team
+    target_team = bottleneck_df.iloc[0]['team']
+    times_bottle = bottleneck_df.iloc[0]['times_bottleneck']
+    
+    # 2. Identify Weakest Link on THAT Team
+    # Filter Umas to only those on the target team
+    team_umas = uma_df[uma_df['team'] == target_team]
+    
+    if not team_umas.empty:
+        # Sort by a mix of Avg Score and Potential (Max Score)
+        # We penalize Umas who have low max potential more heavily
+        worst_uma = team_umas.sort_values(by='avg_delta_team').iloc[0]
+        
+        uma_name = worst_uma['uma_name']
+        avg_score = int(worst_uma['avg_score'])
+        delta = int(worst_uma['avg_delta_team'])
+        
+        # Calculate Lift: If they performed at 0 delta (Team Average)
+        potential_lift = abs(delta) * 3 # approx 3 runs a week? Or just per run.
+        
+        recommendation = (
+            f"PRIORITY: Improve {target_team} Team\n"
+            f"This team is the bottleneck in {times_bottle} of your runs.\n\n"
+            f"TARGET: Replace {uma_name}\n"
+            f"Current Avg: {avg_score:,} pts\n"
+            f"Performance: {delta:,} pts below team avg\n"
+            f"Expected Lift: +{abs(delta):,} pts per run"
+        )
+        color = '#FF5252' # Red
+    else:
+        recommendation = "Data inconsistently. Keep submitting runs."
+        color = '#FFD700'
+
+    # Draw the Recommendation Box
+    ax_main.text(0.05, 0.8, "COACH'S ANALYSIS", color='#A0A0A0', fontsize=12, weight='bold')
+    ax_main.text(0.05, 0.5, recommendation, color='white', fontsize=18, weight='bold', va='center')
+    
+    # Draw a little "Constraint" bar chart on the right side of the banner?
+    # (Simplified for now to just text to ensure stability)
+
+    # --- PART 2: The Data (Bottom Table) ---
+    ax_table.axis('off')
+    
+    headers = ["Weakest Umas (By Team Delta)", "Team", "Avg Score", "Max Potential", "Avg Team Delta"]
+    col_x = [0.05, 0.4, 0.55, 0.7, 0.85]
+    
+    for i, h in enumerate(headers):
+        ax_table.text(col_x[i], 0.9, h, color='#A0A0A0', weight='bold', transform=ax_table.transAxes)
+        
+    y_pos = 0.8
+    # Show top 5 weakest Umas across ALL teams
+    for _, row in uma_df.head(5).iterrows():
+        name = str(row['uma_name'])
+        team = str(row['team'])
+        avg = f"{int(row['avg_score']):,}"
+        max_s = f"{int(row['max_score']):,}"
+        delta = f"{int(row['avg_delta_team']):,}"
+        
+        c = '#FF5252' if int(row['avg_delta_team']) < -2000 else '#E0E0E0'
+
+        ax_table.text(col_x[0], y_pos, name, color='white', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[1], y_pos, team, color='white', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[2], y_pos, avg, color='#E0E0E0', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[3], y_pos, max_s, color='#E0E0E0', fontsize=12, transform=ax_table.transAxes)
+        ax_table.text(col_x[4], y_pos, delta, color=c, weight='bold', fontsize=12, transform=ax_table.transAxes)
+        
+        y_pos -= 0.15
+
+    _add_timestamps_to_fig(fig, "Coach Panel v1.0")
+    
+    return _save_fig(fig)
+
+def _save_fig(fig):
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+            filepath = tmp_file.name
+        fig.savefig(filepath, bbox_inches='tight', pad_inches=0.3, facecolor=fig.get_facecolor())
+        return filepath
+    except Exception:
         return None
