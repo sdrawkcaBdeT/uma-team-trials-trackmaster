@@ -155,20 +155,16 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
 
-    # --- UPDATED FUNCTION ---
     def get_leaderboard_data(self, user_id: int = None, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """Fetches the main leaderboard data, with optional filters."""
         conn = self.get_conn()
         try:
-            # Build query dynamically
             params = []
             where_clauses = ["r.status = 'approved'"]
             
-            # --- THIS IS THE NEW LOGIC ---
             if user_id is not None:
                 where_clauses.append("r.discord_user_id = %s")
                 params.append(user_id)
-            # --- END NEW LOGIC ---
 
             if roster_id is not None:
                 where_clauses.append("r.roster_id = %s")
@@ -180,6 +176,8 @@ class DatabaseManager:
 
             where_sql = " AND ".join(where_clauses)
             
+            # We join user_roster_settings (urs) to get the display_name if it exists
+            # We use ARRAY_AGG(... ORDER BY s.score DESC)[1] to pick the user associated with the MAX score.
             sql_query = f"""
                 SELECT 
                     s.uma_name,
@@ -187,16 +185,17 @@ class DatabaseManager:
                     s.team,
                     MAX(s.score) as max_score,
                     AVG(s.score) as avg_score,
-                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY s.score DESC) as p95_score
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY s.score DESC) as p95_score,
+                    (ARRAY_AGG(COALESCE(urs.display_name, r.discord_user_name) ORDER BY s.score DESC))[1] as trainer_name
                 FROM {SCORES_TABLE} s
                 JOIN {RUNS_TABLE} r ON s.event_id = r.event_id
+                LEFT JOIN {ROSTER_TABLE} urs ON r.discord_user_id = urs.discord_user_id
                 WHERE {where_sql}
                 GROUP BY s.uma_name, s.epithet, s.team
                 ORDER BY max_score DESC;
             """
             df = pd.read_sql(sql_query, conn, params=params)
 
-            # Format numbers for cleaner display
             if not df.empty:
                 df['avg_score'] = df['avg_score'].round(0).astype(int)
                 df['p95_score'] = df['p95_score'].round(0).astype(int)
@@ -344,5 +343,29 @@ class DatabaseManager:
         except psycopg2.Error as e:
             logger.error(f"Error getting active roster: {e}")
             return 1 # Default to 1 on error
+        finally:
+            self.release_conn(conn)
+            
+    def set_user_display_name(self, user_id: int, display_name: str) -> bool:
+        """Sets a custom display name for the user."""
+        conn = self.get_conn()
+        try:
+            with conn.cursor() as cursor:
+                # Upsert: Update if exists, Insert if not (using default roster 1)
+                cursor.execute(
+                    f"""
+                    INSERT INTO {ROSTER_TABLE} (discord_user_id, active_roster_id, display_name)
+                    VALUES (%s, 1, %s)
+                    ON CONFLICT (discord_user_id) 
+                    DO UPDATE SET display_name = %s
+                    """,
+                    (user_id, display_name, display_name)
+                )
+                conn.commit()
+                return True
+        except psycopg2.Error as e:
+            logger.error(f"Error setting display name: {e}")
+            conn.rollback()
+            return False
         finally:
             self.release_conn(conn)

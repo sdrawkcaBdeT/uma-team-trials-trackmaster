@@ -178,6 +178,25 @@ class SubmissionCog(commands.Cog):
         else:
             await interaction.followup.send("An error occurred while setting your roster.", ephemeral=True)
 
+    @app_commands.command(name="set_name", description="Sets a custom display name for the leaderboard (instead of your Discord username).")
+    @app_commands.describe(name="Your preferred Trainer Name.")
+    async def set_display_name(self, interaction: discord.Interaction, name: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        if len(name) > 20:
+             await interaction.followup.send("Name is too long (max 20 chars).", ephemeral=True)
+             return
+
+        success = await asyncio.to_thread(
+            self.bot.db_manager.set_user_display_name,
+            interaction.user.id,
+            name
+        )
+        if success:
+            await interaction.followup.send(f"Your Trainer Name has been updated to **{name}**.", ephemeral=True)
+        else:
+            await interaction.followup.send("An error occurred while updating your name.", ephemeral=True)
+
 
 async def setup(bot: TrackmasterBot):
     await bot.add_cog(SubmissionCog(bot))
