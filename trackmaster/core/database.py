@@ -83,6 +83,7 @@ class DatabaseManager:
             finally:
                 self.release_conn(conn)
 
+    # --- THIS FUNCTION IS NOW FIXED ---
     def create_pending_run(self, user_id: int, user_name: str, roster_id: int, scores: List[Dict[str, Any]]) -> str:
         """
         Saves a new run and its scores to the DB in a single transaction.
@@ -95,12 +96,28 @@ class DatabaseManager:
                 now = datetime.datetime.now(datetime.UTC)
                 week_str = get_current_season_id(now)
                 
-                # Get next event ID for this week
+                # --- START OF FIX ---
+                # We can't use COUNT(*) as it fails when runs are deleted.
+                # We must find the MAX number part of the ID for the current week.
                 cursor.execute(
-                    f"SELECT COUNT(*) FROM {RUNS_TABLE} WHERE run_week = %s", (week_str,)
+                    f"""
+                    SELECT MAX(CAST(SUBSTRING(event_id FROM 'EVT-([0-9]+)$') AS INTEGER))
+                    FROM {RUNS_TABLE}
+                    WHERE run_week = %s
+                    """,
+                    (week_str,)
                 )
-                next_id = cursor.fetchone()[0] + 1
+                max_id_row = cursor.fetchone()
+                
+                if max_id_row[0] is not None:
+                    # Found an existing run, increment from it
+                    next_id = max_id_row[0] + 1
+                else:
+                    # This is the first run of the week
+                    next_id = 1
+                    
                 event_id = f"{week_str}-EVT-{next_id:03d}"
+                # --- END OF FIX ---
                 
                 # 2. Insert the main run record
                 cursor.execute(
@@ -155,7 +172,6 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
 
-    # --- UPDATED FUNCTION ---
     def get_leaderboard_data(self, user_id: int = None, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """Fetches the main leaderboard data, with optional filters."""
         conn = self.get_conn()
@@ -164,11 +180,9 @@ class DatabaseManager:
             params = []
             where_clauses = ["r.status = 'approved'"]
             
-            # --- THIS IS THE NEW LOGIC ---
             if user_id is not None:
                 where_clauses.append("r.discord_user_id = %s")
                 params.append(user_id)
-            # --- END NEW LOGIC ---
 
             if roster_id is not None:
                 where_clauses.append("r.roster_id = %s")
@@ -208,7 +222,6 @@ class DatabaseManager:
         finally:
             self.release_conn(conn)
     
-    # --- UPDATED FUNCTION ---
     def get_team_summary_data(self, user_id: int = None, roster_id: int = None, week: str = None) -> Optional[pd.DataFrame]:
         """
         Fetches the team summary data, with optional filters.
@@ -219,11 +232,9 @@ class DatabaseManager:
             params = []
             where_clauses = ["r.status = 'approved'"]
             
-            # --- THIS IS THE NEW LOGIC ---
             if user_id is not None:
                 where_clauses.append("r.discord_user_id = %s")
                 params.append(user_id)
-            # --- END NEW LOGIC ---
 
             if roster_id is not None:
                 where_clauses.append("r.roster_id = %s")
