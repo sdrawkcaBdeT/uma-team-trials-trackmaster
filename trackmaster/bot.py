@@ -5,7 +5,8 @@ from discord.ext import commands
 import logging
 import asyncio # We need this for to_thread
 from trackmaster.config import settings
-from trackmaster.core.database import DatabaseManager # <-- Our new class
+from trackmaster.core.db import db_manager as session_manager # The low-level session manager
+from trackmaster.core.database import DatabaseManager # The repository
 from trackmaster.core.ocr_processor import setup_local_extractor
 
 logger = logging.getLogger(__name__)
@@ -27,16 +28,16 @@ class TrackmasterBot(commands.Bot):
     async def setup_hook(self):
         """This runs once when the bot logs in."""
         
-        # 1. Initialize Database
+        # 1. Initialize Database Session Manager
         try:
+            session_manager.init(host=settings.DB_HOST)
             self.db_manager = DatabaseManager()
-            # Run the synchronous init function in a separate thread
-            # await asyncio.to_thread(self.db_manager.initialize_database) # <--- COMMENTED OUT
-            # logger.info("Database initialized successfully.") # <--- COMMENTED OUT
-            logger.info("Database connection pool created.") # <-- More accurate log
+            
+            # Initialize tables (Async)
+            await self.db_manager.initialize_database()
+            logger.info("Database initialized and connected.")
         except Exception as e:
-            # We still want to catch errors from the POOL creation
-            logger.critical(f"Failed to create database connection pool: {e}") 
+            logger.critical(f"Failed to connect to database: {e}") 
             await self.close()
             return    
         
@@ -66,7 +67,5 @@ class TrackmasterBot(commands.Bot):
 
     async def close(self):
         """Clean up resources before shutting down."""
-        if self.db_manager:
-            self.db_manager.close_all() # <-- Call the sync close method
-            logger.info("Database connection pool closed.")
+        await session_manager.close()
         await super().close()

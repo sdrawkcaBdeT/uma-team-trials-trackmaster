@@ -36,8 +36,7 @@ class ReportingCog(commands.Cog):
             desc_parts.append(f"Filtered by Week: **{week}**")
             title += f" (Week {week})"
 
-        leaderboard_df = await asyncio.to_thread(
-            self.bot.db_manager.get_leaderboard_data,
+        leaderboard_df = await self.bot.db_manager.get_leaderboard_data(
             user_id=interaction.user.id,
             roster_id=roster_id,
             week=week
@@ -77,8 +76,7 @@ class ReportingCog(commands.Cog):
             desc_parts.append(f"Filtered by Week: **{week}**")
             title += f" (Week {week})"
 
-        leaderboard_df = await asyncio.to_thread(
-            self.bot.db_manager.get_leaderboard_data,
+        leaderboard_df = await self.bot.db_manager.get_leaderboard_data(
             user_id=None,
             roster_id=roster_id,
             week=week
@@ -118,8 +116,7 @@ class ReportingCog(commands.Cog):
             desc_parts.append(f"Filtered by Week: **{week}**")
             title += f" (Week {week})"
 
-        team_summary_df = await asyncio.to_thread(
-            self.bot.db_manager.get_team_summary_data,
+        team_summary_df = await self.bot.db_manager.get_team_summary_data(
             user_id=interaction.user.id,
             roster_id=roster_id,
             week=week
@@ -159,8 +156,7 @@ class ReportingCog(commands.Cog):
             desc_parts.append(f"Filtered by Week: **{week}**")
             title += f" (Week {week})"
 
-        team_summary_df = await asyncio.to_thread(
-            self.bot.db_manager.get_team_summary_data,
+        team_summary_df = await self.bot.db_manager.get_team_summary_data(
             user_id=None,
             roster_id=roster_id,
             week=week
@@ -188,8 +184,7 @@ class ReportingCog(commands.Cog):
         await interaction.response.defer()
         
         # 1. Get Data
-        bottleneck_df, uma_df = await asyncio.to_thread(
-            self.bot.db_manager.get_coach_data,
+        bottleneck_df, uma_df = await self.bot.db_manager.get_coach_data(
             interaction.user.id,
             roster_id
         )

@@ -9,16 +9,30 @@ SET search_path TO team_trails_trackmaster;
 DROP TABLE IF EXISTS uma_scores;
 DROP TABLE IF EXISTS team_trial_runs;
 DROP TABLE IF EXISTS user_roster_settings;
+DROP TABLE IF EXISTS weekly_sequences; -- NEW
+DROP TABLE IF EXISTS uma_character_registry; -- NEW
 DROP TYPE IF EXISTS run_status;
 
 -- Create the ENUM type for our validation flow
 CREATE TYPE run_status AS ENUM ('pending_validation', 'approved', 'rejected');
 
+-- NEW: Registry for valid Uma names
+CREATE TABLE uma_character_registry (
+    uma_name VARCHAR(100) PRIMARY KEY,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- NEW: Sequence tracker for per-week IDs
+CREATE TABLE weekly_sequences (
+    week_id VARCHAR(10) PRIMARY KEY, -- "2025-W46"
+    current_val INT NOT NULL DEFAULT 0
+);
+
 -- Main table to log each /submit command
 CREATE TABLE team_trial_runs (
     event_id VARCHAR(32) PRIMARY KEY, -- "2025-W46-EVT-001"
     discord_user_id BIGINT NOT NULL,
-    roster_id INT NOT NULL DEFAULT 1, -- <-- NEW COLUMN
+    roster_id INT NOT NULL DEFAULT 1,
     discord_user_name VARCHAR(100) NOT NULL,
     run_date DATE NOT NULL,
     run_week VARCHAR(10) NOT NULL, -- "2025-W46"
@@ -32,7 +46,7 @@ CREATE TABLE uma_scores (
     event_id VARCHAR(32) NOT NULL 
         REFERENCES team_trial_runs(event_id) ON DELETE CASCADE,
     uma_name VARCHAR(100) NOT NULL,
-    epithet VARCHAR(100) NULL, -- <-- ADD THIS LINE
+    epithet VARCHAR(100) NULL,
     team VARCHAR(20) NOT NULL, -- 'Mile', 'Sprint', etc.
     score INT NOT NULL
 );
@@ -40,7 +54,8 @@ CREATE TABLE uma_scores (
 -- To store a user's active roster
 CREATE TABLE IF NOT EXISTS user_roster_settings (
     discord_user_id BIGINT PRIMARY KEY,
-    active_roster_id INT NOT NULL DEFAULT 1
+    active_roster_id INT NOT NULL DEFAULT 1,
+    display_name VARCHAR(100)
 );
 
 -- Create indexes for faster querying

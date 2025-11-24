@@ -45,9 +45,7 @@ class ValidationView(discord.ui.View):
         await self.disable_all_buttons(interaction)
         
         # 3. Update database
-        success = await asyncio.to_thread(
-            self.bot.db_manager.set_run_status, self.event_id, 'approved'
-        )
+        success = await self.bot.db_manager.set_run_status(self.event_id, 'approved')
         
         # 4. Give NEW feedback
         if success:
@@ -79,9 +77,7 @@ class ValidationView(discord.ui.View):
         await self.disable_all_buttons(interaction)
         
         # 3. Update database (delete the run)
-        success = await asyncio.to_thread(
-            self.bot.db_manager.set_run_status, self.event_id, 'rejected'
-        )
+        success = await self.bot.db_manager.set_run_status(self.event_id, 'rejected')
 
         # 4. Give feedback
         if success:
@@ -97,7 +93,7 @@ class ValidationView(discord.ui.View):
             # We don't have the original interaction object, so we can't edit it.
             # But the view is stopped, so the buttons won't work anyway.
             # We will run the DB delete to prevent a pending run from sitting forever.
-            await asyncio.to_thread(self.bot.db_manager.set_run_status, self.event_id, 'rejected')
+            await self.bot.db_manager.set_run_status(self.event_id, 'rejected')
             print(f"Run {self.event_id} timed out and was rejected.")
             # self.stop() is called automatically
 

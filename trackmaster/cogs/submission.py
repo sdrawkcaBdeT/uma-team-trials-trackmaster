@@ -106,14 +106,12 @@ class SubmissionCog(commands.Cog):
             
             final_roster_id = roster_id
             if final_roster_id is None:
-                final_roster_id = await asyncio.to_thread(
-                    self.bot.db_manager.get_user_active_roster,
+                final_roster_id = await self.bot.db_manager.get_user_active_roster(
                     interaction.user.id
                 )
             
             # 5. Save to DB
-            event_id = await asyncio.to_thread(
-                self.bot.db_manager.create_pending_run,
+            event_id = await self.bot.db_manager.create_pending_run(
                 interaction.user.id,
                 str(interaction.user),
                 final_roster_id, 
@@ -168,8 +166,7 @@ class SubmissionCog(commands.Cog):
             await interaction.followup.send("Roster ID must be a positive number.", ephemeral=True)
             return
 
-        success = await asyncio.to_thread(
-            self.bot.db_manager.set_user_active_roster,
+        success = await self.bot.db_manager.set_user_active_roster(
             interaction.user.id,
             roster_id
         )
@@ -187,8 +184,7 @@ class SubmissionCog(commands.Cog):
              await interaction.followup.send("Name is too long (max 20 chars).", ephemeral=True)
              return
 
-        success = await asyncio.to_thread(
-            self.bot.db_manager.set_user_display_name,
+        success = await self.bot.db_manager.set_user_display_name(
             interaction.user.id,
             name
         )

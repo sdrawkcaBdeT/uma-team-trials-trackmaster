@@ -5,78 +5,26 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any
 import asyncio
 
-# TODO: Move this to a DB table or a flat file (e.g., umas.json)
-# For now, a set is fine.
-
 # Define valid teams to detect swaps
 VALID_TEAMS = {"Sprint", "Mile", "Medium", "Long", "Dirt"}
 
-VALID_UMA_NAMES = {
-    "King Halo",
-    "Nice Nature",
-    "Matikanefukukitaru",
-    "Haru Urara",
-    "Sakura Bakushin O",
-    "Winning Ticket",
-    "Agnes Tachyon",
-    "Mejiro Ryan",
-    "Super Creek",
-    "Mayano Top Gun",
-    "Air Groove",
-    "El Condor Pasa",
-    "Grass Wonder",
-    "Daiwa Scarlet",
-    "Vodka",
-    "Gold Ship",
-    "Rice Shower",
-    "Symboli Rudolf",
-    "Mejiro McQueen",
-    "Taiki Shuttle",
-    "Oguri Cap",
-    "Maruzensky",
-    "Tokai Teio",
-    "Silence Suzuka",
-    "Special Week",
-    "TM Opera O",
-    "Mihono Bourbon",
-    "Biwa Hayahide",
-    # "Mejiro McQueen" Anime
-    #"Tokai Teio (Anime)",
-    "Curren Chan",
-    "Narita Taishin",
-    "Smart Falcon",
-    "Narita Brian",
-    # "Mayano Top Gun (Wedding)",
-    # "Air Groove (Wedding)",
-    "Seiun Sky",
-    "Hishi Amazon",
-    # "El Condor Pasa (Fantasy)",
-    # "Grass Wonder (Fantasy)",
-    "Fuji Kiseki",
-    "Gold City",
-    # "Maruzensky (Summer)",
-    # "Special Week (Summer)",
-    "Meisho Doto",
-    "Eishin Flash",
-    # "Matikanefukukitaru (Full Armor)",
-    "Hishi Akebono",
-    "Agnes Digital",
-    # "Super Creek (Halloween)",
-    # "Rice Shower (Halloween)",
-    "Kawakami Princess",
-    "Manhattan Cafe",
-    # "Gold City (Festival)",
-    # "Symboli Rudolf (Festival)",
-    "Tosen Jordan",
-    "Mejiro Dober",
-    "Fine Motion",
-    "Tamamo Cross",
-    "Sakura Chiyono O",
-    "Mejiro Ardan",
-    "Admire Vega",
-    "Kitasan Black",
-    # etc
+# Fallback list if DB is empty (kept for safety/initialization)
+DEFAULT_VALID_UMA_NAMES = {
+    "King Halo", "Nice Nature", "Matikanefukukitaru", "Haru Urara", "Sakura Bakushin O",
+    "Winning Ticket", "Agnes Tachyon", "Mejiro Ryan", "Super Creek", "Mayano Top Gun",
+    "Air Groove", "El Condor Pasa", "Grass Wonder", "Daiwa Scarlet", "Vodka",
+    "Gold Ship", "Rice Shower", "Symboli Rudolf", "Mejiro McQueen", "Taiki Shuttle",
+    "Oguri Cap", "Maruzensky", "Tokai Teio", "Silence Suzuka", "Special Week",
+    "TM Opera O", "Mihono Bourbon", "Biwa Hayahide", "Curren Chan", "Narita Taishin",
+    "Smart Falcon", "Narita Brian", "Seiun Sky", "Hishi Amazon", "Fuji Kiseki",
+    "Gold City", "Meisho Doto", "Eishin Flash", "Hishi Akebono", "Agnes Digital",
+    "Kawakami Princess", "Manhattan Cafe", "Tosen Jordan", "Mejiro Dober",
+    "Fine Motion", "Tamamo Cross", "Sakura Chiyono O", "Mejiro Ardan", "Admire Vega",
+    "Kitasan Black"
 }
+
+# We expose this for the DB init logic to import
+VALID_UMA_NAMES = DEFAULT_VALID_UMA_NAMES
 
 @dataclass
 class ValidationResult:
@@ -132,13 +80,17 @@ def _run_validation_sync(ocr_scores: List[Dict[str, Any]], valid_names: set, con
 class ValidationService:
     def __init__(self, db_manager):
         self.db_manager = db_manager
-        self.valid_names = VALID_UMA_NAMES
         self.confidence_threshold = 85
 
     async def validate_and_correct(self, ocr_scores: List[Dict[str, Any]]) -> ValidationResult:
+        # Fetch valid names from DB
+        valid_names = await self.db_manager.get_valid_uma_names()
+        if not valid_names:
+            valid_names = DEFAULT_VALID_UMA_NAMES
+            
         return await asyncio.to_thread(
             _run_validation_sync,
             ocr_scores,
-            self.valid_names,
+            valid_names,
             self.confidence_threshold
         )
